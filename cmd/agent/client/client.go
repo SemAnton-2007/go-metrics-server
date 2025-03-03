@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -15,6 +16,11 @@ type Client struct {
 
 // NewClient — конструктор для Client.
 func NewClient(serverURL string) *Client {
+	// Добавляем схему "http://", если она отсутствует
+	if !strings.HasPrefix(serverURL, "http://") && !strings.HasPrefix(serverURL, "https://") {
+		serverURL = "http://" + serverURL
+	}
+
 	return &Client{
 		ServerURL: serverURL,
 		Client:    &http.Client{Timeout: 10 * time.Second},
