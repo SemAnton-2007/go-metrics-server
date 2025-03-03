@@ -1,4 +1,4 @@
-package metrics_server
+package webservers
 
 import (
 	"go-metrics-server/cmd/server/config"
