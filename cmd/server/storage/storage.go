@@ -5,19 +5,23 @@ import (
 	"sync"
 )
 
+// MemStorage — интерфейс для работы с хранилищем метрик.
 type MemStorage interface {
 	UpdateGauge(name string, value float64)
 	UpdateCounter(name string, value int64)
 	GetGauge(name string) (float64, error)
 	GetCounter(name string) (int64, error)
+	GetAllMetrics() map[string]interface{}
 }
 
+// memStorage — реализация MemStorage.
 type memStorage struct {
 	gauges   map[string]float64
 	counters map[string]int64
 	mu       sync.Mutex
 }
 
+// NewMemStorage — конструктор для memStorage.
 func NewMemStorage() MemStorage {
 	return &memStorage{
 		gauges:   make(map[string]float64),
@@ -53,4 +57,18 @@ func (s *memStorage) GetCounter(name string) (int64, error) {
 		return value, nil
 	}
 	return 0, errors.New("counter not found")
+}
+
+func (s *memStorage) GetAllMetrics() map[string]interface{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	metrics := make(map[string]interface{})
+	for name, value := range s.gauges {
+		metrics[name] = value
+	}
+	for name, value := range s.counters {
+		metrics[name] = value
+	}
+	return metrics
 }

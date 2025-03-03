@@ -5,15 +5,20 @@ import (
 	"go-metrics-server/cmd/server/handlers"
 	"go-metrics-server/cmd/server/storage"
 	"net/http"
+
+	"github.com/go-chi/chi/v5"
 )
 
 func NewServer(cfg *config.Config, storage storage.MemStorage) *http.Server {
-	mux := http.NewServeMux()
+	r := chi.NewRouter()
 
-	mux.HandleFunc("/update/", handlers.UpdateMetricHandler(storage))
+	// Регистрируем обработчики
+	r.Post("/update/{type}/{name}/{value}", handlers.UpdateMetricHandler(storage))
+	r.Get("/value/{type}/{name}", handlers.GetMetricValueHandler(storage))
+	r.Get("/", handlers.GetAllMetricsHandler(storage))
 
 	return &http.Server{
 		Addr:    cfg.ServerAddr,
-		Handler: mux,
+		Handler: r,
 	}
 }
