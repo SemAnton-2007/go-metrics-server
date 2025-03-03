@@ -3,6 +3,7 @@ package config
 import (
 	"flag"
 	"fmt"
+	"os"
 )
 
 type Config struct {
@@ -12,8 +13,16 @@ type Config struct {
 func NewConfig() *Config {
 	cfg := &Config{}
 
-	// Определяем флаг для адреса сервера
-	flag.StringVar(&cfg.ServerAddr, "a", "localhost:8080", "Адрес HTTP-сервера")
+	// Значение по умолчанию
+	defaultServerAddr := "localhost:8080"
+
+	// Получаем значение из переменной окружения
+	if addr := os.Getenv("ADDRESS"); addr != "" {
+		defaultServerAddr = addr
+	}
+
+	// Определяем флаг
+	flag.StringVar(&cfg.ServerAddr, "a", defaultServerAddr, "Адрес HTTP-сервера")
 
 	// Парсим флаги
 	flag.Parse()
