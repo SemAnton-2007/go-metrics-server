@@ -38,6 +38,11 @@ func TestNewConfig(t *testing.T) {
 	assert.Equal(t, 15*time.Second, cfg.ReportInterval)
 
 	// Тест 3: Флаги
+	// Сохраняем оригинальные os.Args
+	oldArgs := os.Args
+	defer func() { os.Args = oldArgs }()
+
+	// Устанавливаем аргументы для теста
 	os.Args = []string{"cmd", "-a=127.0.0.1:9090", "-p=5", "-r=15"}
 	cfg = NewConfig()
 	assert.Equal(t, "127.0.0.1:9090", cfg.ServerAddr)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -37,19 +38,19 @@ func NewConfig() *Config {
 		}
 	}
 
-	// Определяем флаги
-	flag.StringVar(&cfg.ServerAddr, "a", defaultServerAddr, "Адрес HTTP-сервера")
-	pollInterval := flag.Int("p", defaultPollInterval, "Интервал опроса метрик (в секундах)")
-	reportInterval := flag.Int("r", defaultReportInterval, "Интервал отправки метрик (в секундах)")
+	// Используем локальный FlagSet для изоляции флагов
+	fs := flag.NewFlagSet("config", flag.ContinueOnError)
+	fs.StringVar(&cfg.ServerAddr, "a", defaultServerAddr, "Адрес HTTP-сервера")
+	pollInterval := fs.Int("p", defaultPollInterval, "Интервал опроса метрик (в секундах)")
+	reportInterval := fs.Int("r", defaultReportInterval, "Интервал отправки метрик (в секундах)")
 
-	// Парсим флаги
-	flag.Parse()
+	// Фильтруем аргументы, чтобы игнорировать флаги go test
+	args := filterArgs(os.Args[1:]) // Игнорируем первый аргумент (имя программы)
 
-	// Проверяем, что нет неизвестных флагов
-	if flag.NArg() > 0 {
-		fmt.Println("Ошибка: неизвестные флаги или аргументы")
-		flag.Usage()
-		panic("неизвестные флаги")
+	// Парсим только отфильтрованные аргументы
+	if err := fs.Parse(args); err != nil {
+		fmt.Println("Ошибка при парсинге флагов:", err)
+		os.Exit(1)
 	}
 
 	// Преобразуем интервалы в time.Duration
@@ -57,4 +58,15 @@ func NewConfig() *Config {
 	cfg.ReportInterval = time.Duration(*reportInterval) * time.Second
 
 	return cfg
+}
+
+// filterArgs удаляет флаги go test из списка аргументов
+func filterArgs(args []string) []string {
+	var filtered []string
+	for i := 0; i < len(args); i++ {
+		if !strings.HasPrefix(args[i], "-test.") {
+			filtered = append(filtered, args[i])
+		}
+	}
+	return filtered
 }
