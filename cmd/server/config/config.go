@@ -7,6 +7,10 @@ import (
 	"strings"
 )
 
+const (
+	defaultServerAddr = "localhost:8080" // Значение по умолчанию для адреса сервера
+)
+
 type Config struct {
 	ServerAddr string // Адрес сервера
 }
@@ -14,32 +18,30 @@ type Config struct {
 func NewConfig() *Config {
 	cfg := &Config{}
 
-	// Значение по умолчанию
-	defaultServerAddr := "localhost:8080"
-
 	// Получаем значение из переменной окружения
+	serverAddr := defaultServerAddr
 	if addr := os.Getenv("ADDRESS"); addr != "" {
-		defaultServerAddr = addr
+		serverAddr = addr
 	}
 
 	// Используем локальный FlagSet для изоляции флагов
 	fs := flag.NewFlagSet("config", flag.ContinueOnError)
-	fs.StringVar(&cfg.ServerAddr, "a", defaultServerAddr, "Адрес HTTP-сервера")
+	fs.StringVar(&cfg.ServerAddr, "a", serverAddr, "Адрес HTTP-сервера")
 
 	// Фильтруем аргументы, чтобы игнорировать флаги go test
 	args := filterArgs(os.Args[1:]) // Игнорируем первый аргумент (имя программы)
 
 	// Парсим только отфильтрованные аргументы
 	if err := fs.Parse(args); err != nil {
-		fmt.Println("Ошибка при парсинге флагов:", err)
+		fmt.Println(fmt.Errorf("ошибка при парсинге флагов: %w", err))
 		os.Exit(1)
 	}
 
 	// Проверяем, что нет неизвестных флагов
 	if fs.NArg() > 0 {
-		fmt.Println("Ошибка: неизвестные флаги или аргументы")
+		fmt.Println(fmt.Errorf("ошибка: неизвестные флаги или аргументы"))
 		fs.Usage()
-		panic("неизвестные флаги")
+		fmt.Println(fmt.Errorf("неизвестные флаги"))
 	}
 
 	return cfg

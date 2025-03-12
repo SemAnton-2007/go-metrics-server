@@ -8,6 +8,11 @@ import (
 	"time"
 )
 
+const (
+	httpScheme  = "http://"
+	httpsScheme = "https://"
+)
+
 // Client — HTTP-клиент для отправки метрик.
 type Client struct {
 	ServerURL string
@@ -17,8 +22,8 @@ type Client struct {
 // NewClient — конструктор для Client.
 func NewClient(serverURL string) *Client {
 	// Добавляем схему "http://", если она отсутствует
-	if !strings.HasPrefix(serverURL, "http://") && !strings.HasPrefix(serverURL, "https://") {
-		serverURL = "http://" + serverURL
+	if !strings.HasPrefix(serverURL, httpScheme) && !strings.HasPrefix(serverURL, httpsScheme) {
+		serverURL = httpScheme + serverURL
 	}
 
 	return &Client{
