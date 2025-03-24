@@ -72,6 +72,9 @@ func gzipMiddleware(next http.Handler) http.Handler {
 		// Сжатие исходящего ответа
 		if supportsGzip && isCompressibleContent(r) {
 			w.Header().Set("Content-Encoding", "gzip")
+			w.Header().Set("Transfer-Encoding", "chunked")
+			w.Header().Del("Content-Length")
+
 			gz := gzip.NewWriter(w)
 			defer gz.Close()
 
