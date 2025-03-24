@@ -4,29 +4,40 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 )
 
 const (
-	defaultServerAddr = "localhost:8080" // Значение по умолчанию для адреса сервера
+	defaultServerAddr    = "localhost:8080" // Значение по умолчанию для адреса сервера
+	defaultStoreInterval = 300 * time.Second
+	defaultFileStorage   = "/tmp/metrics-db.json"
+	defaultRestore       = true
 )
 
 type Config struct {
-	ServerAddr string // Адрес сервера
+	ServerAddr    string        // Адрес сервера
+	StoreInterval time.Duration // Интервал сохранения на диск
+	FileStorage   string        // Путь к файлу сохранения
+	Restore       bool          // Загружать данные при старте
 }
 
 func NewConfig() *Config {
 	cfg := &Config{}
 
-	// Получаем значение из переменной окружения
-	serverAddr := defaultServerAddr
-	if addr := os.Getenv("ADDRESS"); addr != "" {
-		serverAddr = addr
-	}
+	// Получаем значения из переменных окружения или используем значения по умолчанию
+	serverAddr := getEnvOrDefault("ADDRESS", defaultServerAddr)
+	storeInterval := parseDuration(getEnvOrDefault("STORE_INTERVAL", defaultStoreInterval.String()))
+	fileStorage := getEnvOrDefault("FILE_STORAGE_PATH", defaultFileStorage)
+	restore := parseBool(getEnvOrDefault("RESTORE", strconv.FormatBool(defaultRestore)))
 
 	// Используем локальный FlagSet для изоляции флагов
 	fs := flag.NewFlagSet("config", flag.ContinueOnError)
 	fs.StringVar(&cfg.ServerAddr, "a", serverAddr, "Адрес HTTP-сервера")
+	fs.DurationVar(&cfg.StoreInterval, "i", storeInterval, "Интервал сохранения на диск (секунды)")
+	fs.StringVar(&cfg.FileStorage, "f", fileStorage, "Файл для сохранения метрик")
+	fs.BoolVar(&cfg.Restore, "r", restore, "Загружать данные при старте")
 
 	// Фильтруем аргументы, чтобы игнорировать флаги go test
 	args := filterArgs(os.Args[1:]) // Игнорируем первый аргумент (имя программы)
@@ -41,7 +52,7 @@ func NewConfig() *Config {
 	if fs.NArg() > 0 {
 		fmt.Println(fmt.Errorf("ошибка: неизвестные флаги или аргументы"))
 		fs.Usage()
-		fmt.Println(fmt.Errorf("неизвестные флаги"))
+		os.Exit(1)
 	}
 
 	return cfg
@@ -56,4 +67,29 @@ func filterArgs(args []string) []string {
 		}
 	}
 	return filtered
+}
+
+func getEnvOrDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
+func parseDuration(value string) time.Duration {
+	if dur, err := time.ParseDuration(value); err == nil {
+		return dur
+	}
+	// Попробуем интерпретировать как число секунд
+	if sec, err := strconv.Atoi(value); err == nil {
+		return time.Duration(sec) * time.Second
+	}
+	return defaultStoreInterval
+}
+
+func parseBool(value string) bool {
+	if b, err := strconv.ParseBool(value); err == nil {
+		return b
+	}
+	return defaultRestore
 }
