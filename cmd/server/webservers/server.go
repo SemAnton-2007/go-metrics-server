@@ -25,6 +25,10 @@ func NewServer(cfg *config.Config, storage storage.MemStorage) *http.Server {
 	r.Get("/value/{type}/{name}", handlers.GetMetricValueHandler(storage))
 	r.Get("/", handlers.GetAllMetricsHandler(storage))
 
+	// Новые JSON эндпоинты
+	r.Post("/update/", handlers.UpdateMetricJSONHandler(storage))
+	r.Post("/value/", handlers.GetMetricValueJSONHandler(storage))
+
 	return &http.Server{
 		Addr:    cfg.ServerAddr,
 		Handler: r,
