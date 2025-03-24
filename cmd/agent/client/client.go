@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"go-metrics-server/internal/models"
@@ -27,7 +28,6 @@ func NewClient(serverURL string) *Client {
 	if !strings.HasPrefix(serverURL, httpScheme) && !strings.HasPrefix(serverURL, httpsScheme) {
 		serverURL = httpScheme + serverURL
 	}
-
 	return &Client{
 		ServerURL: serverURL,
 		Client:    &http.Client{Timeout: 10 * time.Second},
@@ -54,15 +54,27 @@ func (c *Client) SendMetric(metricType, name string, value interface{}) error {
 		return fmt.Errorf("failed to marshal metric: %w", err)
 	}
 
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	if _, err := gz.Write(jsonData); err != nil {
+		return fmt.Errorf("compression error: %w", err)
+	}
+	if err := gz.Close(); err != nil {
+		return fmt.Errorf("compression close error: %w", err)
+	}
+
 	req, err := http.NewRequest(
 		http.MethodPost,
 		fmt.Sprintf("%s/update/", c.ServerURL),
-		bytes.NewBuffer(jsonData),
+		&buf,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
+
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+	req.Header.Set("Accept-Encoding", "gzip")
 
 	resp, err := c.Client.Do(req)
 	if err != nil {

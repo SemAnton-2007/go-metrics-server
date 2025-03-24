@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"go-metrics-server/cmd/server/storage"
@@ -82,14 +83,18 @@ func GetAllMetricsHandler(storage storage.MemStorage) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		metrics := storage.GetAllMetrics()
 
+		// Явно устанавливаем Content-Type
 		w.Header().Set("Content-Type", "text/html")
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, "<h1>Metrics</h1>")
-		fmt.Fprintln(w, "<ul>")
+
+		var buf bytes.Buffer
+		buf.WriteString("<h1>Metrics</h1>\n<ul>\n")
 		for name, value := range metrics {
-			fmt.Fprintf(w, "<li>%s: %v</li>", name, value)
+			buf.WriteString(fmt.Sprintf("<li>%s: %v</li>", name, value))
 		}
-		fmt.Fprintln(w, "</ul>")
+		buf.WriteString("</ul>")
+
+		// Если клиент поддерживает gzip, middleware сожмет ответ автоматически
+		w.Write(buf.Bytes())
 	}
 }
 
