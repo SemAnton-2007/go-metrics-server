@@ -27,15 +27,15 @@ func GzipMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
+		// Устанавливаем заголовки
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Transfer-Encoding", "chunked")
+		w.Header().Del("Content-Length")
+
 		// Создаем gzip writer
 		gz := gzip.NewWriter(w)
 		defer gz.Close()
 
-		// Устанавливаем заголовки
-		w.Header().Set("Content-Encoding", "gzip")
-		w.Header().Del("Content-Length")
-
-		// Передаем обработчику специальный writer
 		next.ServeHTTP(&gzipResponseWriter{ResponseWriter: w, Writer: gz}, r)
 	})
 }
