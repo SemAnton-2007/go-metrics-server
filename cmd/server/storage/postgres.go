@@ -130,6 +130,10 @@ func (s *PostgresStorage) GetAllMetrics() map[string]interface{} {
 				metrics[name] = value
 			}
 		}
+		// Добавляем проверку ошибок после итерации
+		if err := rows.Err(); err != nil {
+			fmt.Printf("Error after iterating gauge rows: %v\n", err)
+		}
 	}
 
 	// Получаем counter метрики
@@ -142,6 +146,10 @@ func (s *PostgresStorage) GetAllMetrics() map[string]interface{} {
 			if err := rows.Scan(&name, &value); err == nil {
 				metrics[name] = value
 			}
+		}
+		// Добавляем проверку ошибок после итерации
+		if err := rows.Err(); err != nil {
+			fmt.Printf("Error after iterating counter rows: %v\n", err)
 		}
 	}
 
