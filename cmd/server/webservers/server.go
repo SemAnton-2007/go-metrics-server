@@ -40,6 +40,9 @@ func NewServer(cfg *config.Config, storage storage.MemStorage, db *database.DB) 
 	// Новый batch endpoint
 	r.Post("/updates/", handlers.BatchUpdateHandler(storage))
 
+	// Новый batch endpoint
+	r.Post("/updates/", handlers.BatchUpdateHandler(storage))
+
 	// Добавляем обработчик для проверки БД, если БД подключена
 	if db != nil {
 		r.Get("/ping", handlers.PingHandler(db))

@@ -188,6 +188,7 @@ func GetMetricValueJSONHandler(storage storage.MemStorage) http.HandlerFunc {
 	}
 }
 
+// BatchUpdateHandler - обработчик для batch updates
 func BatchUpdateHandler(storage storage.MemStorage) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Content-Type") != "application/json" {
@@ -199,6 +200,20 @@ func BatchUpdateHandler(storage storage.MemStorage) http.HandlerFunc {
 		if err := json.NewDecoder(r.Body).Decode(&metrics); err != nil {
 			http.Error(w, "Invalid JSON", http.StatusBadRequest)
 			return
+		}
+
+		// Проверяем, что есть хотя бы одна метрика
+		if len(metrics) == 0 {
+			http.Error(w, "Empty metrics batch", http.StatusBadRequest)
+			return
+		}
+
+		// Проверяем все метрики перед обновлением
+		for _, metric := range metrics {
+			if metric.ID == "" {
+				http.Error(w, "Metric name is required", http.StatusBadRequest)
+				return
+			}
 		}
 
 		if err := storage.UpdateMetrics(metrics); err != nil {

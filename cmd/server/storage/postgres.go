@@ -6,6 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"go-metrics-server/internal/models"
+	"time"
+
+	"github.com/jackc/pgerrcode"
+	"github.com/jackc/pgx/v5/pgconn"
+)
+
+const (
+	maxRetries = 3
+	retryDelay = time.Second
 )
 
 type PostgresStorage struct {
@@ -22,7 +31,7 @@ func NewPostgresStorage(db *sql.DB) (*PostgresStorage, error) {
 		return nil, fmt.Errorf("database connection check failed: %w", err)
 	}
 
-	if err := storage.createTables(); err != nil {
+	if err := storage.createTablesWithRetry(); err != nil {
 		return nil, fmt.Errorf("failed to initialize tables: %w", err)
 	}
 
@@ -63,26 +72,67 @@ func (s *PostgresStorage) createTables() error {
 	return nil
 }
 
+func (s *PostgresStorage) createTablesWithRetry() error {
+	var lastErr error
+	delays := []time.Duration{retryDelay, 3 * retryDelay, 5 * retryDelay}
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			time.Sleep(delays[attempt-1])
+		}
+
+		err := s.createTables()
+		if err == nil {
+			return nil
+		}
+
+		lastErr = err
+		if !isRetryableDBError(err) {
+			break
+		}
+	}
+
+	return fmt.Errorf("after %d attempts, last error: %w", maxRetries+1, lastErr)
+}
+
+func isRetryableDBError(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		// Connection exceptions (Class 08)
+		return pgErr.Code == pgerrcode.ConnectionException ||
+			pgErr.Code == pgerrcode.ConnectionDoesNotExist ||
+			pgErr.Code == pgerrcode.ConnectionFailure ||
+			pgErr.Code == pgerrcode.SQLClientUnableToEstablishSQLConnection ||
+			pgErr.Code == pgerrcode.SQLServerRejectedEstablishmentOfSQLConnection ||
+			pgErr.Code == pgerrcode.TransactionResolutionUnknown
+	}
+	return false
+}
+
 func (s *PostgresStorage) UpdateGauge(name string, value float64) {
-	_, err := s.db.ExecContext(s.ctx, `
-		INSERT INTO gauges (name, value) 
-		VALUES ($1, $2)
-		ON CONFLICT (name) 
-		DO UPDATE SET value = EXCLUDED.value
-	`, name, value)
-	if err != nil {
+	if err := s.updateWithRetry(func() error {
+		_, err := s.db.ExecContext(s.ctx, `
+			INSERT INTO gauges (name, value)
+			VALUES ($1, $2)
+			ON CONFLICT (name)
+			DO UPDATE SET value = EXCLUDED.value
+		`, name, value)
+		return err
+	}); err != nil {
 		fmt.Printf("Failed to update gauge: %v\n", err)
 	}
 }
 
 func (s *PostgresStorage) UpdateCounter(name string, value int64) {
-	_, err := s.db.ExecContext(s.ctx, `
-		INSERT INTO counters (name, value) 
-		VALUES ($1, $2)
-		ON CONFLICT (name) 
-		DO UPDATE SET value = counters.value + EXCLUDED.value
-	`, name, value)
-	if err != nil {
+	if err := s.updateWithRetry(func() error {
+		_, err := s.db.ExecContext(s.ctx, `
+			INSERT INTO counters (name, value)
+			VALUES ($1, $2)
+			ON CONFLICT (name)
+			DO UPDATE SET value = counters.value + EXCLUDED.value
+		`, name, value)
+		return err
+	}); err != nil {
 		fmt.Printf("Failed to update counter: %v\n", err)
 	}
 }
@@ -157,16 +207,6 @@ func (s *PostgresStorage) GetAllMetrics() map[string]interface{} {
 	return metrics
 }
 
-func (s *PostgresStorage) SaveToFile(filename string) error {
-	// Не реализовано для PostgresStorage
-	return nil
-}
-
-func (s *PostgresStorage) LoadFromFile(filename string) error {
-	// Не реализовано для PostgresStorage
-	return nil
-}
-
 func (s *PostgresStorage) UpdateMetrics(metrics []models.Metrics) error {
 	tx, err := s.db.BeginTx(s.ctx, nil)
 	if err != nil {
@@ -207,4 +247,77 @@ func (s *PostgresStorage) UpdateMetrics(metrics []models.Metrics) error {
 	}
 
 	return tx.Commit()
+}
+
+func (s *PostgresStorage) updateWithRetry(fn func() error) error {
+	var lastErr error
+	delays := []time.Duration{retryDelay, 3 * retryDelay, 5 * retryDelay}
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			time.Sleep(delays[attempt-1])
+		}
+
+		err := fn()
+		if err == nil {
+			return nil
+		}
+
+		lastErr = err
+		if !isRetryableDBError(err) {
+			break
+		}
+	}
+
+	return fmt.Errorf("after %d attempts, last error: %w", maxRetries+1, lastErr)
+}
+
+func (s *PostgresStorage) updateMetricsTransaction(metrics []models.Metrics) error {
+	tx, err := s.db.BeginTx(s.ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin transaction error: %w", err)
+	}
+	defer tx.Rollback()
+
+	for _, metric := range metrics {
+		switch metric.MType {
+		case "gauge":
+			if metric.Value == nil {
+				continue
+			}
+			_, err = tx.ExecContext(s.ctx, `
+				INSERT INTO gauges (name, value)
+				VALUES ($1, $2)
+				ON CONFLICT (name)q
+				DO UPDATE SET value = EXCLUDED.value
+			`, metric.ID, *metric.Value)
+			if err != nil {
+				return fmt.Errorf("update gauge error: %w", err)
+			}
+
+		case "counter":
+			if metric.Delta == nil {
+				continue
+			}
+			_, err = tx.ExecContext(s.ctx, `
+				INSERT INTO counters (name, value)
+				VALUES ($1, $2)
+				ON CONFLICT (name)
+				DO UPDATE SET value = counters.value + EXCLUDED.value
+			`, metric.ID, *metric.Delta)
+			if err != nil {
+				return fmt.Errorf("update counter error: %w", err)
+			}
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (s *PostgresStorage) SaveToFile(filename string) error {
+	return nil
+}
+
+func (s *PostgresStorage) LoadFromFile(filename string) error {
+	return nil
 }

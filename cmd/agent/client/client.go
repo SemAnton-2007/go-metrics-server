@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go-metrics-server/internal/models"
 	"net/http"
@@ -14,7 +15,15 @@ import (
 const (
 	httpScheme  = "http://"
 	httpsScheme = "https://"
+	maxRetries  = 3
+	retryDelay  = time.Second
 )
+
+var retryableErrors = []error{
+	errors.New("connection refused"),
+	errors.New("connection reset by peer"),
+	errors.New("i/o timeout"),
+}
 
 type Client struct {
 	ServerURL string
@@ -34,7 +43,7 @@ func NewClient(serverURL string) *Client {
 // SendMetric - отправляет одну метрику (сохраняем старый функционал для совместимости)
 func (c *Client) SendMetric(metricType, name string, value interface{}) error {
 	metric := c.createMetric(metricType, name, value)
-	return c.sendRequest("/update/", []models.Metrics{metric})
+	return c.sendWithRetry("/update/", []models.Metrics{metric})
 }
 
 // SendMetricsBatch - отправляет метрики батчем (новый функционал)
@@ -42,16 +51,20 @@ func (c *Client) SendMetricsBatch(metrics map[string]interface{}) error {
 	var batch []models.Metrics
 
 	for name, value := range metrics {
-		var metricType string
-		switch value.(type) {
+		var metric models.Metrics
+		metric.ID = name
+
+		switch v := value.(type) {
 		case float64:
-			metricType = "gauge"
+			metric.MType = "gauge"
+			metric.Value = &v
 		case int64:
-			metricType = "counter"
+			metric.MType = "counter"
+			metric.Delta = &v
 		default:
 			continue
 		}
-		batch = append(batch, c.createMetric(metricType, name, value))
+		batch = append(batch, metric)
 	}
 
 	if len(batch) == 0 {
@@ -75,6 +88,39 @@ func (c *Client) createMetric(metricType, name string, value interface{}) models
 	}
 
 	return metric
+}
+
+func (c *Client) sendWithRetry(endpoint string, metrics []models.Metrics) error {
+	var lastErr error
+	delays := []time.Duration{retryDelay, 3 * retryDelay, 5 * retryDelay}
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			time.Sleep(delays[attempt-1])
+		}
+
+		err := c.sendRequest(endpoint, metrics)
+		if err == nil {
+			return nil
+		}
+
+		lastErr = err
+		if !c.isRetryableError(err) {
+			break
+		}
+	}
+
+	return fmt.Errorf("after %d attempts, last error: %w", maxRetries+1, lastErr)
+}
+
+func (c *Client) isRetryableError(err error) bool {
+	errStr := err.Error()
+	for _, retryableErr := range retryableErrors {
+		if strings.Contains(errStr, retryableErr.Error()) {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Client) sendRequest(endpoint string, metrics []models.Metrics) error {
