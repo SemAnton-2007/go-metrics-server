@@ -19,6 +19,7 @@ func main() {
 
 	var db *database.DB
 	var err error
+	var store storage.MemStorage
 
 	// Инициализируем соединение с БД, если указан DSN
 	if cfg.DatabaseDSN != "" {
@@ -28,41 +29,49 @@ func main() {
 		}
 		defer db.Close()
 		log.Println("Connected to PostgreSQL database")
-	}
 
-	baseStorage := storage.NewMemStorage()
-
-	// Загрузка данных при старте, если разрешено
-	if cfg.Restore && cfg.FileStorage != "" {
-		if err := baseStorage.LoadFromFile(cfg.FileStorage); err != nil {
-			log.Printf("Failed to load metrics from file: %v\n", err)
-		} else {
-			log.Println("Metrics loaded successfully from file")
+		// Используем PostgresStorage как основное хранилище
+		pgStorage, err := storage.NewPostgresStorage(db.DB)
+		if err != nil {
+			log.Fatalf("Failed to initialize Postgres storage: %v\n", err)
 		}
-	}
-
-	var store storage.MemStorage
-	var saveTicker *time.Ticker
-
-	if cfg.StoreInterval > 0 && cfg.FileStorage != "" {
-		// Периодическое сохранение
-		store = baseStorage
-		saveTicker = time.NewTicker(cfg.StoreInterval)
-		go func() {
-			for range saveTicker.C {
-				if err := store.SaveToFile(cfg.FileStorage); err != nil {
-					log.Printf("Failed to save metrics: %v\n", err)
-				} else {
-					log.Println("Metrics saved successfully")
-				}
-			}
-		}()
-	} else if cfg.FileStorage != "" {
-		// Синхронное сохранение
-		store = newSyncSaveStorage(baseStorage, cfg.FileStorage)
+		store = pgStorage
 	} else {
-		// Сохранение отключено
-		store = baseStorage
+		// Старая логика с файловым или in-memory хранилищем
+		baseStorage := storage.NewMemStorage()
+
+		// Загрузка данных при старте, если разрешено
+		if cfg.Restore && cfg.FileStorage != "" {
+			if err := baseStorage.LoadFromFile(cfg.FileStorage); err != nil {
+				log.Printf("Failed to load metrics from file: %v\n", err)
+			} else {
+				log.Println("Metrics loaded successfully from file")
+			}
+		}
+
+		var saveTicker *time.Ticker
+
+		if cfg.StoreInterval > 0 && cfg.FileStorage != "" {
+			// Периодическое сохранение
+			store = baseStorage
+			saveTicker = time.NewTicker(cfg.StoreInterval)
+			go func() {
+				for range saveTicker.C {
+					if err := store.SaveToFile(cfg.FileStorage); err != nil {
+						log.Printf("Failed to save metrics: %v\n", err)
+					} else {
+						log.Println("Metrics saved successfully")
+					}
+				}
+			}()
+			defer saveTicker.Stop()
+		} else if cfg.FileStorage != "" {
+			// Синхронное сохранение
+			store = newSyncSaveStorage(baseStorage, cfg.FileStorage)
+		} else {
+			// Сохранение отключено
+			store = baseStorage
+		}
 	}
 
 	srv := webservers.NewServer(cfg, store, db)
@@ -81,13 +90,8 @@ func main() {
 	<-done
 	log.Println("Server is shutting down...")
 
-	// Остановка тикера сохранения
-	if saveTicker != nil {
-		saveTicker.Stop()
-	}
-
 	// Сохранение данных перед выходом (если не используется БД)
-	if cfg.FileStorage != "" && db == nil {
+	if cfg.DatabaseDSN == "" && cfg.FileStorage != "" {
 		if err := store.SaveToFile(cfg.FileStorage); err != nil {
 			log.Printf("Failed to save metrics on shutdown: %v\n", err)
 		} else {
