@@ -25,6 +25,7 @@ func NewServer(cfg *config.Config, storage storage.MemStorage, db *database.DB) 
 	r.Use(middleware.LoggerMiddleware(logger))
 
 	r.Use(gzipMiddleware)
+
 	r.Use(jsonContentTypeMiddleware(storage))
 
 	// Регистрируем обработчики
@@ -35,6 +36,9 @@ func NewServer(cfg *config.Config, storage storage.MemStorage, db *database.DB) 
 	// Новые JSON эндпоинты
 	r.Post("/update/", handlers.UpdateMetricJSONHandler(storage))
 	r.Post("/value/", handlers.GetMetricValueJSONHandler(storage))
+
+	// Новый batch endpoint
+	r.Post("/updates/", handlers.BatchUpdateHandler(storage))
 
 	// Добавляем обработчик для проверки БД, если БД подключена
 	if db != nil {
@@ -110,6 +114,9 @@ func jsonContentTypeMiddleware(storage storage.MemStorage) func(http.Handler) ht
 					return
 				case "/value/":
 					handlers.GetMetricValueJSONHandler(storage)(w, r)
+					return
+				case "/updates/":
+					handlers.BatchUpdateHandler(storage)(w, r)
 					return
 				}
 			}

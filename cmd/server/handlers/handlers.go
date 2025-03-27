@@ -187,3 +187,27 @@ func GetMetricValueJSONHandler(storage storage.MemStorage) http.HandlerFunc {
 		json.NewEncoder(w).Encode(metric)
 	}
 }
+
+func BatchUpdateHandler(storage storage.MemStorage) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Content-Type") != "application/json" {
+			http.Error(w, "Content-Type must be application/json", http.StatusBadRequest)
+			return
+		}
+
+		var metrics []models.Metrics
+		if err := json.NewDecoder(r.Body).Decode(&metrics); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+
+		if err := storage.UpdateMetrics(metrics); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to update metrics: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(metrics)
+	}
+}

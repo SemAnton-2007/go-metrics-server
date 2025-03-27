@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"go-metrics-server/internal/models"
 )
 
 type PostgresStorage struct {
@@ -164,4 +165,46 @@ func (s *PostgresStorage) SaveToFile(filename string) error {
 func (s *PostgresStorage) LoadFromFile(filename string) error {
 	// Не реализовано для PostgresStorage
 	return nil
+}
+
+func (s *PostgresStorage) UpdateMetrics(metrics []models.Metrics) error {
+	tx, err := s.db.BeginTx(s.ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	for _, metric := range metrics {
+		switch metric.MType {
+		case "gauge":
+			if metric.Value == nil {
+				continue
+			}
+			_, err = tx.ExecContext(s.ctx, `
+                INSERT INTO gauges (name, value) 
+                VALUES ($1, $2)
+                ON CONFLICT (name) 
+                DO UPDATE SET value = EXCLUDED.value
+            `, metric.ID, *metric.Value)
+			if err != nil {
+				return fmt.Errorf("failed to update gauge %s: %w", metric.ID, err)
+			}
+
+		case "counter":
+			if metric.Delta == nil {
+				continue
+			}
+			_, err = tx.ExecContext(s.ctx, `
+                INSERT INTO counters (name, value) 
+                VALUES ($1, $2)
+                ON CONFLICT (name) 
+                DO UPDATE SET value = counters.value + EXCLUDED.value
+            `, metric.ID, *metric.Delta)
+			if err != nil {
+				return fmt.Errorf("failed to update counter %s: %w", metric.ID, err)
+			}
+		}
+	}
+
+	return tx.Commit()
 }

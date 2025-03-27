@@ -3,6 +3,7 @@ package storage
 import (
 	"encoding/json"
 	"errors"
+	"go-metrics-server/internal/models"
 	"os"
 	"sync"
 )
@@ -16,6 +17,7 @@ type MemStorage interface {
 	GetAllMetrics() map[string]interface{}
 	SaveToFile(filename string) error
 	LoadFromFile(filename string) error
+	UpdateMetrics(metrics []models.Metrics) error
 }
 
 // memStorage — реализация MemStorage.
@@ -133,5 +135,24 @@ func (s *memStorage) LoadFromFile(filename string) error {
 	s.gauges = data.Gauges
 	s.counters = data.Counters
 
+	return nil
+}
+
+func (s *memStorage) UpdateMetrics(metrics []models.Metrics) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, metric := range metrics {
+		switch metric.MType {
+		case "gauge":
+			if metric.Value != nil {
+				s.gauges[metric.ID] = *metric.Value
+			}
+		case "counter":
+			if metric.Delta != nil {
+				s.counters[metric.ID] += *metric.Delta
+			}
+		}
+	}
 	return nil
 }
