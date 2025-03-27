@@ -16,13 +16,11 @@ const (
 	httpsScheme = "https://"
 )
 
-// Client — HTTP-клиент для отправки метрик.
 type Client struct {
 	ServerURL string
 	Client    *http.Client
 }
 
-// NewClient — конструктор для Client.
 func NewClient(serverURL string) *Client {
 	if !strings.HasPrefix(serverURL, httpScheme) && !strings.HasPrefix(serverURL, httpsScheme) {
 		serverURL = httpScheme + serverURL
@@ -33,13 +31,13 @@ func NewClient(serverURL string) *Client {
 	}
 }
 
-// SendMetric — отправляет метрику на сервер в формате JSON.
+// SendMetric - отправляет одну метрику (сохраняем старый функционал для совместимости)
 func (c *Client) SendMetric(metricType, name string, value interface{}) error {
 	metric := c.createMetric(metricType, name, value)
-	return c.sendMetricsBatch([]models.Metrics{metric})
+	return c.sendRequest("/update/", []models.Metrics{metric})
 }
 
-// SendMetricsBatch - отправляет метрики батчем
+// SendMetricsBatch - отправляет метрики батчем (новый функционал)
 func (c *Client) SendMetricsBatch(metrics map[string]interface{}) error {
 	var batch []models.Metrics
 
@@ -57,10 +55,10 @@ func (c *Client) SendMetricsBatch(metrics map[string]interface{}) error {
 	}
 
 	if len(batch) == 0 {
-		return nil // Не отправляем пустые батчи
+		return nil
 	}
 
-	return c.sendMetricsBatch(batch)
+	return c.sendRequest("/updates/", batch)
 }
 
 func (c *Client) createMetric(metricType, name string, value interface{}) models.Metrics {
@@ -79,7 +77,7 @@ func (c *Client) createMetric(metricType, name string, value interface{}) models
 	return metric
 }
 
-func (c *Client) sendMetricsBatch(metrics []models.Metrics) error {
+func (c *Client) sendRequest(endpoint string, metrics []models.Metrics) error {
 	jsonData, err := json.Marshal(metrics)
 	if err != nil {
 		return fmt.Errorf("failed to marshal metrics: %w", err)
@@ -96,7 +94,7 @@ func (c *Client) sendMetricsBatch(metrics []models.Metrics) error {
 
 	req, err := http.NewRequest(
 		http.MethodPost,
-		fmt.Sprintf("%s/updates/", c.ServerURL),
+		fmt.Sprintf("%s%s", c.ServerURL, endpoint),
 		&buf,
 	)
 	if err != nil {
