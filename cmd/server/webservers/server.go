@@ -3,6 +3,7 @@ package webservers
 import (
 	"compress/gzip"
 	"go-metrics-server/cmd/server/config"
+	"go-metrics-server/cmd/server/database"
 	"go-metrics-server/cmd/server/handlers"
 	"go-metrics-server/cmd/server/middleware"
 	"go-metrics-server/cmd/server/storage"
@@ -14,7 +15,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
-func NewServer(cfg *config.Config, storage storage.MemStorage) *http.Server {
+func NewServer(cfg *config.Config, storage storage.MemStorage, db *database.DB) *http.Server {
 	r := chi.NewRouter()
 
 	// Инициализация логгера
@@ -34,6 +35,11 @@ func NewServer(cfg *config.Config, storage storage.MemStorage) *http.Server {
 	// Новые JSON эндпоинты
 	r.Post("/update/", handlers.UpdateMetricJSONHandler(storage))
 	r.Post("/value/", handlers.GetMetricValueJSONHandler(storage))
+
+	// Добавляем обработчик для проверки БД, если БД подключена
+	if db != nil {
+		r.Get("/ping", handlers.PingHandler(db))
+	}
 
 	return &http.Server{
 		Addr:    cfg.ServerAddr,

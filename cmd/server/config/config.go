@@ -15,6 +15,7 @@ const (
 	defaultStoreInterval = 300 * time.Second
 	defaultFileStorage   = "/tmp/metrics-db.json"
 	defaultRestore       = true
+	defaultDatabaseDSN   = ""
 )
 
 type Config struct {
@@ -22,6 +23,7 @@ type Config struct {
 	StoreInterval time.Duration // Интервал сохранения на диск
 	FileStorage   string        // Путь к файлу сохранения
 	Restore       bool          // Загружать данные при старте
+	DatabaseDSN   string
 }
 
 func NewConfig() *Config {
@@ -32,6 +34,7 @@ func NewConfig() *Config {
 	storeInterval := parseDuration(getEnvOrDefault("STORE_INTERVAL", defaultStoreInterval.String()))
 	fileStorage := getEnvOrDefault("FILE_STORAGE_PATH", defaultFileStorage)
 	restore := parseBool(getEnvOrDefault("RESTORE", strconv.FormatBool(defaultRestore)))
+	databaseDSN := getEnvOrDefault("DATABASE_DSN", defaultDatabaseDSN)
 
 	// Используем локальный FlagSet для изоляции флагов
 	fs := flag.NewFlagSet("config", flag.ContinueOnError)
@@ -39,6 +42,7 @@ func NewConfig() *Config {
 	fs.DurationVar(&cfg.StoreInterval, "i", storeInterval, "Интервал сохранения на диск (секунды)")
 	fs.StringVar(&cfg.FileStorage, "f", fileStorage, "Файл для сохранения метрик")
 	fs.BoolVar(&cfg.Restore, "r", restore, "Загружать данные при старте")
+	fs.StringVar(&cfg.DatabaseDSN, "d", databaseDSN, "DSN")
 
 	// Фильтруем аргументы, чтобы игнорировать флаги go test
 	args := filterArgs(os.Args[1:]) // Игнорируем первый аргумент (имя программы)

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"go-metrics-server/cmd/server/config"
+	"go-metrics-server/cmd/server/database"
 	"go-metrics-server/cmd/server/storage"
 
 	"github.com/stretchr/testify/assert"
@@ -13,8 +14,8 @@ import (
 
 func TestNewServer(t *testing.T) {
 	cfg := &config.Config{ServerAddr: "localhost:8080"}
-	storage := storage.NewMemStorage()
-	srv := NewServer(cfg, storage)
+	store := storage.NewMemStorage()
+	srv := NewServer(cfg, store, nil) // nil для DB, так как тестируем без БД
 
 	// Тест 1: Проверка маршрута /update/
 	ts := httptest.NewServer(srv.Handler)
@@ -29,4 +30,21 @@ func TestNewServer(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	resp.Body.Close()
+
+	// Тест 3: Проверка маршрута /ping (должен отсутствовать при nil DB)
+	resp, err = http.Get(ts.URL + "/ping")
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	resp.Body.Close()
+}
+
+func TestPingHandler(t *testing.T) {
+	cfg := &config.Config{ServerAddr: "localhost:8080"}
+	store := storage.NewMemStorage()
+	mockDB := &database.DB{}
+	srv := NewServer(cfg, store, mockDB)
+
+	ts := httptest.NewServer(srv.Handler)
+	defer ts.Close()
+
 }
