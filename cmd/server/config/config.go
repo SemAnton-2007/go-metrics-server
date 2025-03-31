@@ -3,6 +3,7 @@ package config
 import (
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -77,19 +78,26 @@ func getEnvOrDefault(key, defaultValue string) string {
 }
 
 func parseDuration(value string) time.Duration {
-	if dur, err := time.ParseDuration(value); err == nil {
+	dur, err := time.ParseDuration(value)
+	if err == nil {
 		return dur
 	}
-	// Попробуем интерпретировать как число секунд
-	if sec, err := strconv.Atoi(value); err == nil {
+
+	// Пробуем интерпретировать как число секунд
+	sec, err := strconv.Atoi(value)
+	if err == nil {
 		return time.Duration(sec) * time.Second
 	}
+
+	log.Printf("Warning: Invalid STORE_INTERVAL value: %s, using default %v", value, defaultStoreInterval)
 	return defaultStoreInterval
 }
 
 func parseBool(value string) bool {
-	if b, err := strconv.ParseBool(value); err == nil {
-		return b
+	b, err := strconv.ParseBool(value)
+	if err != nil {
+		log.Printf("Warning: Invalid RESTORE value: %s, using default %v", value, defaultRestore)
+		return defaultRestore
 	}
-	return defaultRestore
+	return b
 }
