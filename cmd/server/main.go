@@ -1,99 +1,138 @@
-package config
+package main
 
 import (
-	"flag"
-	"fmt"
+	"context"
+	"go-metrics-server/cmd/server/config"
+	"go-metrics-server/cmd/server/database"
+	"go-metrics-server/cmd/server/storage"
+	"go-metrics-server/cmd/server/webservers"
+	"log"
+	"net/http"
 	"os"
-	"strconv"
-	"strings"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
-const (
-	defaultServerAddr    = "localhost:8080" // Значение по умолчанию для адреса сервера
-	defaultStoreInterval = 300 * time.Second
-	defaultFileStorage   = "/tmp/metrics-db.json"
-	defaultRestore       = true
-	defaultDatabaseDSN   = ""
-)
+func main() {
+	cfg := config.NewConfig()
 
-type Config struct {
-	ServerAddr    string        // Адрес сервера
-	StoreInterval time.Duration // Интервал сохранения на диск
-	FileStorage   string        // Путь к файлу сохранения
-	Restore       bool          // Загружать данные при старте
-	DatabaseDSN   string
-}
+	var db *database.DB
+	var err error
+	var store storage.MemStorage
 
-func NewConfig() *Config {
-	cfg := &Config{}
+	// Инициализируем соединение с БД, если указан DSN
+	if cfg.DatabaseDSN != "" {
+		db, err = database.New(cfg.DatabaseDSN)
+		if err != nil {
+			log.Fatalf("Failed to connect to database: %v\n", err)
+		}
+		defer db.Close()
+		log.Println("Connected to PostgreSQL database")
 
-	// Получаем значения из переменных окружения или используем значения по умолчанию
-	serverAddr := getEnvOrDefault("ADDRESS", defaultServerAddr)
-	storeInterval := parseDuration(getEnvOrDefault("STORE_INTERVAL", defaultStoreInterval.String()))
-	fileStorage := getEnvOrDefault("FILE_STORAGE_PATH", defaultFileStorage)
-	restore := parseBool(getEnvOrDefault("RESTORE", strconv.FormatBool(defaultRestore)))
-	databaseDSN := getEnvOrDefault("DATABASE_DSN", defaultDatabaseDSN)
+		// Используем PostgresStorage как основное хранилище
+		pgStorage, err := storage.NewPostgresStorage(db.DB)
+		if err != nil {
+			log.Fatalf("Failed to initialize Postgres storage: %v\n", err)
+		}
+		store = pgStorage
+	} else {
+		// Старая логика с файловым или in-memory хранилищем
+		baseStorage := storage.NewMemStorage()
 
-	// Используем локальный FlagSet для изоляции флагов
-	fs := flag.NewFlagSet("config", flag.ContinueOnError)
-	fs.StringVar(&cfg.ServerAddr, "a", serverAddr, "Адрес HTTP-сервера")
-	fs.DurationVar(&cfg.StoreInterval, "i", storeInterval, "Интервал сохранения на диск (секунды)")
-	fs.StringVar(&cfg.FileStorage, "f", fileStorage, "Файл для сохранения метрик")
-	fs.BoolVar(&cfg.Restore, "r", restore, "Загружать данные при старте")
-	fs.StringVar(&cfg.DatabaseDSN, "d", databaseDSN, "DSN")
+		// Загрузка данных при старте, если разрешено
+		if cfg.Restore && cfg.FileStorage != "" {
+			if err := baseStorage.LoadFromFile(cfg.FileStorage); err != nil {
+				log.Printf("Failed to load metrics from file: %v\n", err)
+			} else {
+				log.Println("Metrics loaded successfully from file")
+			}
+		}
 
-	// Фильтруем аргументы, чтобы игнорировать флаги go test
-	args := filterArgs(os.Args[1:]) // Игнорируем первый аргумент (имя программы)
+		var saveTicker *time.Ticker
 
-	// Парсим только отфильтрованные аргументы
-	if err := fs.Parse(args); err != nil {
-		fmt.Println(fmt.Errorf("ошибка при парсинге флагов: %w", err))
-		os.Exit(1)
-	}
-
-	// Проверяем, что нет неизвестных флагов
-	if fs.NArg() > 0 {
-		fmt.Println(fmt.Errorf("ошибка: неизвестные флаги или аргументы"))
-		fs.Usage()
-		os.Exit(1)
-	}
-
-	return cfg
-}
-
-// filterArgs удаляет флаги go test из списка аргументов
-func filterArgs(args []string) []string {
-	var filtered []string
-	for i := 0; i < len(args); i++ {
-		if !strings.HasPrefix(args[i], "-test.") {
-			filtered = append(filtered, args[i])
+		if cfg.StoreInterval > 0 && cfg.FileStorage != "" {
+			// Периодическое сохранение
+			store = baseStorage
+			saveTicker = time.NewTicker(cfg.StoreInterval)
+			go func() {
+				for range saveTicker.C {
+					if err := store.SaveToFile(cfg.FileStorage); err != nil {
+						log.Printf("Failed to save metrics: %v\n", err)
+					} else {
+						log.Println("Metrics saved successfully")
+					}
+				}
+			}()
+			defer saveTicker.Stop()
+		} else if cfg.FileStorage != "" {
+			// Синхронное сохранение
+			store = newSyncSaveStorage(baseStorage, cfg.FileStorage)
+		} else {
+			// Сохранение отключено
+			store = baseStorage
 		}
 	}
-	return filtered
+
+	srv := webservers.NewServer(cfg, store, db)
+	log.Printf("Server is running on http://%s\n", cfg.ServerAddr)
+
+	// Обработка graceful shutdown
+	done := make(chan os.Signal, 1)
+	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server error: %v\n", err)
+		}
+	}()
+
+	<-done
+	log.Println("Server is shutting down...")
+
+	// Сохранение данных перед выходом (если не используется БД)
+	if cfg.DatabaseDSN == "" && cfg.FileStorage != "" {
+		if err := store.SaveToFile(cfg.FileStorage); err != nil {
+			log.Printf("Failed to save metrics on shutdown: %v\n", err)
+		} else {
+			log.Println("Metrics saved successfully on shutdown")
+		}
+	}
+
+	// Graceful shutdown сервера
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("Server shutdown error: %v\n", err)
+	}
+	log.Println("Server stopped")
 }
 
-func getEnvOrDefault(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
+// syncSaveStorage обертка для синхронного сохранения
+type syncSaveStorage struct {
+	storage.MemStorage
+	filePath string
 }
 
-func parseDuration(value string) time.Duration {
-	if dur, err := time.ParseDuration(value); err == nil {
-		return dur
+func newSyncSaveStorage(s storage.MemStorage, filePath string) *syncSaveStorage {
+	return &syncSaveStorage{
+		MemStorage: s,
+		filePath:   filePath,
 	}
-	// Попробуем интерпретировать как число секунд
-	if sec, err := strconv.Atoi(value); err == nil {
-		return time.Duration(sec) * time.Second
-	}
-	return defaultStoreInterval
 }
 
-func parseBool(value string) bool {
-	if b, err := strconv.ParseBool(value); err == nil {
-		return b
+func (s *syncSaveStorage) UpdateGauge(name string, value float64) {
+	s.MemStorage.UpdateGauge(name, value)
+	s.save()
+}
+
+func (s *syncSaveStorage) UpdateCounter(name string, value int64) {
+	s.MemStorage.UpdateCounter(name, value)
+	s.save()
+}
+
+func (s *syncSaveStorage) save() {
+	if err := s.MemStorage.SaveToFile(s.filePath); err != nil {
+		log.Printf("Failed to save metrics synchronously: %v\n", err)
 	}
-	return defaultRestore
 }
