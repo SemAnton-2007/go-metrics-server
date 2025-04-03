@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go-metrics-server/internal/models"
 	"net/http"
@@ -14,17 +15,22 @@ import (
 const (
 	httpScheme  = "http://"
 	httpsScheme = "https://"
+	maxRetries  = 3
+	retryDelay  = time.Second
 )
 
-// Client — HTTP-клиент для отправки метрик.
+var retryableErrors = []error{
+	errors.New("connection refused"),
+	errors.New("connection reset by peer"),
+	errors.New("i/o timeout"),
+}
+
 type Client struct {
 	ServerURL string
 	Client    *http.Client
 }
 
-// NewClient — конструктор для Client.
 func NewClient(serverURL string) *Client {
-	// Добавляем схему "http://", если она отсутствует
 	if !strings.HasPrefix(serverURL, httpScheme) && !strings.HasPrefix(serverURL, httpsScheme) {
 		serverURL = httpScheme + serverURL
 	}
@@ -34,24 +40,93 @@ func NewClient(serverURL string) *Client {
 	}
 }
 
-// SendMetric — отправляет метрику на сервер в формате JSON.
+// SendMetric - отправляет одну метрику (сохраняем старый функционал для совместимости)
 func (c *Client) SendMetric(metricType, name string, value interface{}) error {
-	var metric models.Metrics
-	metric.ID = name
-	metric.MType = metricType
+	metric := c.createMetric(metricType, name, value)
+	return c.sendWithRetry("/update/", []models.Metrics{metric})
+}
+
+// SendMetricsBatch - отправляет метрики батчем (новый функционал)
+func (c *Client) SendMetricsBatch(metrics map[string]interface{}) error {
+	var batch []models.Metrics
+
+	for name, value := range metrics {
+		var metric models.Metrics
+		metric.ID = name
+
+		switch v := value.(type) {
+		case float64:
+			metric.MType = "gauge"
+			metric.Value = &v
+		case int64:
+			metric.MType = "counter"
+			metric.Delta = &v
+		default:
+			continue
+		}
+		batch = append(batch, metric)
+	}
+
+	if len(batch) == 0 {
+		return nil
+	}
+
+	return c.sendRequest("/updates/", batch)
+}
+
+func (c *Client) createMetric(metricType, name string, value interface{}) models.Metrics {
+	metric := models.Metrics{
+		ID:    name,
+		MType: metricType,
+	}
 
 	switch v := value.(type) {
 	case float64:
 		metric.Value = &v
 	case int64:
 		metric.Delta = &v
-	default:
-		return fmt.Errorf("unsupported value type")
 	}
 
-	jsonData, err := json.Marshal(metric)
+	return metric
+}
+
+func (c *Client) sendWithRetry(endpoint string, metrics []models.Metrics) error {
+	var lastErr error
+	delays := []time.Duration{retryDelay, 3 * retryDelay, 5 * retryDelay}
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			time.Sleep(delays[attempt-1])
+		}
+
+		err := c.sendRequest(endpoint, metrics)
+		if err == nil {
+			return nil
+		}
+
+		lastErr = err
+		if !c.isRetryableError(err) {
+			break
+		}
+	}
+
+	return fmt.Errorf("after %d attempts, last error: %w", maxRetries+1, lastErr)
+}
+
+func (c *Client) isRetryableError(err error) bool {
+	errStr := err.Error()
+	for _, retryableErr := range retryableErrors {
+		if strings.Contains(errStr, retryableErr.Error()) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Client) sendRequest(endpoint string, metrics []models.Metrics) error {
+	jsonData, err := json.Marshal(metrics)
 	if err != nil {
-		return fmt.Errorf("failed to marshal metric: %w", err)
+		return fmt.Errorf("failed to marshal metrics: %w", err)
 	}
 
 	var buf bytes.Buffer
@@ -65,7 +140,7 @@ func (c *Client) SendMetric(metricType, name string, value interface{}) error {
 
 	req, err := http.NewRequest(
 		http.MethodPost,
-		fmt.Sprintf("%s/update/", c.ServerURL),
+		fmt.Sprintf("%s%s", c.ServerURL, endpoint),
 		&buf,
 	)
 	if err != nil {
