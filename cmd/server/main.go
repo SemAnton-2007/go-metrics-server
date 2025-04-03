@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -66,8 +67,10 @@ func main() {
 			}()
 			defer saveTicker.Stop()
 		} else if cfg.FileStorage != "" {
-			// Синхронное сохранение
-			store = newSyncSaveStorage(baseStorage, cfg.FileStorage)
+			// Синхронное сохранение с буферизацией
+			syncStorage := newSyncSaveStorage(baseStorage, cfg.FileStorage)
+			store = syncStorage
+			defer syncStorage.Close()
 		} else {
 			// Сохранение отключено
 			store = baseStorage
@@ -108,31 +111,88 @@ func main() {
 	log.Println("Server stopped")
 }
 
-// syncSaveStorage обертка для синхронного сохранения
+// syncSaveStorage обертка для синхронного сохранения с буферизацией
 type syncSaveStorage struct {
 	storage.MemStorage
-	filePath string
+	filePath    string
+	buffer      map[string]interface{} // буфер для накопления изменений
+	bufferSize  int                    // текущий размер буфера
+	maxBuffer   int                    // максимальный размер буфера перед сбросом на диск
+	flushTicker *time.Ticker           // тикер для периодического сброса
+	mu          sync.Mutex             // мьютекс для защиты буфера
+	stopChan    chan struct{}          // канал для остановки фоновой горутины
 }
 
 func newSyncSaveStorage(s storage.MemStorage, filePath string) *syncSaveStorage {
-	return &syncSaveStorage{
+	storage := &syncSaveStorage{
 		MemStorage: s,
 		filePath:   filePath,
+		buffer:     make(map[string]interface{}),
+		maxBuffer:  10, // сбрасываем на диск каждые 10 изменений
+		stopChan:   make(chan struct{}),
 	}
+
+	// Запускаем фоновую горутину для периодического сброса
+	storage.flushTicker = time.NewTicker(5 * time.Second)
+	go storage.backgroundFlush()
+
+	return storage
+}
+
+func (s *syncSaveStorage) backgroundFlush() {
+	for {
+		select {
+		case <-s.flushTicker.C:
+			s.flush()
+		case <-s.stopChan:
+			s.flushTicker.Stop()
+			return
+		}
+	}
+}
+
+func (s *syncSaveStorage) flush() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.bufferSize == 0 {
+		return
+	}
+
+	// Сохраняем все метрики, а не только буферизованные
+	if err := s.MemStorage.SaveToFile(s.filePath); err != nil {
+		log.Printf("Failed to save metrics synchronously: %v\n", err)
+	}
+
+	// Очищаем буфер
+	s.buffer = make(map[string]interface{})
+	s.bufferSize = 0
 }
 
 func (s *syncSaveStorage) UpdateGauge(name string, value float64) {
 	s.MemStorage.UpdateGauge(name, value)
-	s.save()
+	s.bufferUpdate(name, value)
 }
 
 func (s *syncSaveStorage) UpdateCounter(name string, value int64) {
 	s.MemStorage.UpdateCounter(name, value)
-	s.save()
+	s.bufferUpdate(name, value)
 }
 
-func (s *syncSaveStorage) save() {
-	if err := s.MemStorage.SaveToFile(s.filePath); err != nil {
-		log.Printf("Failed to save metrics synchronously: %v\n", err)
+func (s *syncSaveStorage) bufferUpdate(name string, value interface{}) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.buffer[name] = value
+	s.bufferSize++
+
+	// Если буфер заполнен, сбрасываем на диск
+	if s.bufferSize >= s.maxBuffer {
+		go s.flush()
 	}
+}
+
+func (s *syncSaveStorage) Close() {
+	close(s.stopChan)
+	s.flush() // финальный сброс перед закрытием
 }

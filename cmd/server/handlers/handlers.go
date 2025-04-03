@@ -8,6 +8,7 @@ import (
 	"go-metrics-server/internal/models"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -101,7 +102,8 @@ func GetAllMetricsHandler(storage storage.MemStorage) http.HandlerFunc {
 // UpdateMetricJSONHandler — обработчик для обновления метрик через JSON
 func UpdateMetricJSONHandler(storage storage.MemStorage) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Content-Type") != "application/json" {
+		// Проверяем Content-Type с учетом возможного charset
+		if !strings.Contains(strings.ToLower(r.Header.Get("Content-Type")), "application/json") {
 			http.Error(w, "Content-Type must be application/json", http.StatusBadRequest)
 			return
 		}
@@ -126,6 +128,7 @@ func UpdateMetricJSONHandler(storage storage.MemStorage) http.HandlerFunc {
 			storage.UpdateGauge(metric.ID, *metric.Value)
 			value, _ := storage.GetGauge(metric.ID)
 			metric.Value = &value
+
 		case "counter":
 			if metric.Delta == nil {
 				http.Error(w, "Delta is required for counter", http.StatusBadRequest)
@@ -134,13 +137,22 @@ func UpdateMetricJSONHandler(storage storage.MemStorage) http.HandlerFunc {
 			storage.UpdateCounter(metric.ID, *metric.Delta)
 			value, _ := storage.GetCounter(metric.ID)
 			metric.Delta = &value
+
 		default:
 			http.Error(w, "Invalid metric type", http.StatusBadRequest)
 			return
 		}
 
+		// Устанавливаем заголовки ответа
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(metric)
+		w.Header().Set("Transfer-Encoding", "chunked")
+		w.Header().Del("Content-Length")
+
+		// Кодируем и отправляем ответ
+		if err := json.NewEncoder(w).Encode(metric); err != nil {
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
