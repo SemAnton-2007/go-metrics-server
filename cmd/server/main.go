@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"go-metrics-server/cmd/server/config"
+	"go-metrics-server/cmd/server/database"
 	"go-metrics-server/cmd/server/storage"
 	"go-metrics-server/cmd/server/webservers"
 	"log"
@@ -15,6 +16,20 @@ import (
 
 func main() {
 	cfg := config.NewConfig()
+
+	var db *database.DB
+	var err error
+
+	// Инициализируем соединение с БД, если указан DSN
+	if cfg.DatabaseDSN != "" {
+		db, err = database.New(cfg.DatabaseDSN)
+		if err != nil {
+			log.Fatalf("Failed to connect to database: %v\n", err)
+		}
+		defer db.Close()
+		log.Println("Connected to PostgreSQL database")
+	}
+
 	baseStorage := storage.NewMemStorage()
 
 	// Загрузка данных при старте, если разрешено
@@ -50,7 +65,7 @@ func main() {
 		store = baseStorage
 	}
 
-	srv := webservers.NewServer(cfg, store)
+	srv := webservers.NewServer(cfg, store, db)
 	log.Printf("Server is running on http://%s\n", cfg.ServerAddr)
 
 	// Обработка graceful shutdown
@@ -71,8 +86,8 @@ func main() {
 		saveTicker.Stop()
 	}
 
-	// Сохранение данных перед выходом
-	if cfg.FileStorage != "" {
+	// Сохранение данных перед выходом (если не используется БД)
+	if cfg.FileStorage != "" && db == nil {
 		if err := store.SaveToFile(cfg.FileStorage); err != nil {
 			log.Printf("Failed to save metrics on shutdown: %v\n", err)
 		} else {
