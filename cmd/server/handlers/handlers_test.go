@@ -2,11 +2,14 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"go-metrics-server/cmd/server/storage"
+	"go-metrics-server/internal/models"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
@@ -159,4 +162,64 @@ func TestGetAllMetricsHandler(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "test_gauge: 123.45")
 	assert.Contains(t, w.Body.String(), "test_counter: 10")
+}
+
+// Добавляем в конец файла
+
+func TestUpdateMetricJSONHandler(t *testing.T) {
+	store := storage.NewMemStorage()
+	handler := UpdateMetricJSONHandler(store)
+
+	t.Run("success gauge update", func(t *testing.T) {
+		body := `{"id":"test","type":"gauge","value":1.23}`
+		req := httptest.NewRequest("POST", "/update/", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var resp models.Metrics
+		json.Unmarshal(w.Body.Bytes(), &resp)
+		assert.Equal(t, 1.23, *resp.Value)
+	})
+
+	t.Run("invalid content type", func(t *testing.T) {
+		body := `{"id":"test","type":"gauge","value":1.23}`
+		req := httptest.NewRequest("POST", "/update/", strings.NewReader(body))
+		w := httptest.NewRecorder()
+
+		handler(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestGetMetricValueJSONHandler(t *testing.T) {
+	store := storage.NewMemStorage()
+	handler := GetMetricValueJSONHandler(store)
+	store.UpdateGauge("test", 1.23)
+
+	t.Run("success get gauge", func(t *testing.T) {
+		body := `{"id":"test","type":"gauge"}`
+		req := httptest.NewRequest("POST", "/value/", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var resp models.Metrics
+		json.Unmarshal(w.Body.Bytes(), &resp)
+		assert.Equal(t, 1.23, *resp.Value)
+	})
+
+	t.Run("metric not found", func(t *testing.T) {
+		body := `{"id":"unknown","type":"gauge"}`
+		req := httptest.NewRequest("POST", "/value/", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
 }
