@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"go-metrics-server/cmd/server/config"
+	"go-metrics-server/cmd/server/database"
 	"go-metrics-server/cmd/server/storage"
 	"go-metrics-server/cmd/server/webservers"
 	"log"
@@ -15,42 +16,65 @@ import (
 
 func main() {
 	cfg := config.NewConfig()
-	baseStorage := storage.NewMemStorage()
 
-	// Загрузка данных при старте, если разрешено
-	if cfg.Restore && cfg.FileStorage != "" {
-		if err := baseStorage.LoadFromFile(cfg.FileStorage); err != nil {
-			log.Printf("Failed to load metrics from file: %v\n", err)
+	var db *database.DB
+	var err error
+	var store storage.MemStorage
+
+	// Инициализируем соединение с БД, если указан DSN
+	if cfg.DatabaseDSN != "" {
+		db, err = database.New(cfg.DatabaseDSN)
+		if err != nil {
+			log.Fatalf("Failed to connect to database: %v\n", err)
+		}
+		defer db.Close()
+		log.Println("Connected to PostgreSQL database")
+
+		// Используем PostgresStorage как основное хранилище
+		pgStorage, err := storage.NewPostgresStorage(db.DB)
+		if err != nil {
+			log.Fatalf("Failed to initialize Postgres storage: %v\n", err)
+		}
+		store = pgStorage
+	} else {
+		// Старая логика с файловым или in-memory хранилищем
+		baseStorage := storage.NewMemStorage()
+
+		// Загрузка данных при старте, если разрешено
+		if cfg.Restore && cfg.FileStorage != "" {
+			if err := baseStorage.LoadFromFile(cfg.FileStorage); err != nil {
+				log.Printf("Failed to load metrics from file: %v\n", err)
+			} else {
+				log.Println("Metrics loaded successfully from file")
+			}
+		}
+
+		var saveTicker *time.Ticker
+
+		if cfg.StoreInterval > 0 && cfg.FileStorage != "" {
+			// Периодическое сохранение
+			store = baseStorage
+			saveTicker = time.NewTicker(cfg.StoreInterval)
+			go func() {
+				for range saveTicker.C {
+					if err := store.SaveToFile(cfg.FileStorage); err != nil {
+						log.Printf("Failed to save metrics: %v\n", err)
+					} else {
+						log.Println("Metrics saved successfully")
+					}
+				}
+			}()
+			defer saveTicker.Stop()
+		} else if cfg.FileStorage != "" {
+			// Синхронное сохранение
+			store = newSyncSaveStorage(baseStorage, cfg.FileStorage)
 		} else {
-			log.Println("Metrics loaded successfully from file")
+			// Сохранение отключено
+			store = baseStorage
 		}
 	}
 
-	var store storage.MemStorage
-	var saveTicker *time.Ticker
-
-	if cfg.StoreInterval > 0 && cfg.FileStorage != "" {
-		// Периодическое сохранение
-		store = baseStorage
-		saveTicker = time.NewTicker(cfg.StoreInterval)
-		go func() {
-			for range saveTicker.C {
-				if err := store.SaveToFile(cfg.FileStorage); err != nil {
-					log.Printf("Failed to save metrics: %v\n", err)
-				} else {
-					log.Println("Metrics saved successfully")
-				}
-			}
-		}()
-	} else if cfg.FileStorage != "" {
-		// Синхронное сохранение
-		store = newSyncSaveStorage(baseStorage, cfg.FileStorage)
-	} else {
-		// Сохранение отключено
-		store = baseStorage
-	}
-
-	srv := webservers.NewServer(cfg, store)
+	srv := webservers.NewServer(cfg, store, db)
 	log.Printf("Server is running on http://%s\n", cfg.ServerAddr)
 
 	// Обработка graceful shutdown
@@ -66,13 +90,8 @@ func main() {
 	<-done
 	log.Println("Server is shutting down...")
 
-	// Остановка тикера сохранения
-	if saveTicker != nil {
-		saveTicker.Stop()
-	}
-
-	// Сохранение данных перед выходом
-	if cfg.FileStorage != "" {
+	// Сохранение данных перед выходом (если не используется БД)
+	if cfg.DatabaseDSN == "" && cfg.FileStorage != "" {
 		if err := store.SaveToFile(cfg.FileStorage); err != nil {
 			log.Printf("Failed to save metrics on shutdown: %v\n", err)
 		} else {
