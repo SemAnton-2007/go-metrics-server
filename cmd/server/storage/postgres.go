@@ -22,8 +22,7 @@ type PostgresStorage struct {
 	ctx context.Context
 }
 
-func NewPostgresStorage(db *sql.DB) (*PostgresStorage, error) {
-	ctx := context.Background()
+func NewPostgresStorage(ctx context.Context, db *sql.DB) (*PostgresStorage, error) {
 	storage := &PostgresStorage{db: db, ctx: ctx}
 
 	// Проверяем соединение и права
@@ -167,44 +166,61 @@ func (s *PostgresStorage) GetCounter(name string) (int64, error) {
 	return value, nil
 }
 
-func (s *PostgresStorage) GetAllMetrics() map[string]interface{} {
+func (s *PostgresStorage) GetAllMetrics() (map[string]interface{}, error) {
 	metrics := make(map[string]interface{})
+	var errs []error
 
 	// Получаем gauge метрики
 	rows, err := s.db.QueryContext(s.ctx, `SELECT name, value FROM gauges`)
-	if err == nil {
+	if err != nil {
+		errs = append(errs, fmt.Errorf("failed to get gauges: %w", err))
+	} else {
 		defer rows.Close()
 		for rows.Next() {
 			var name string
 			var value float64
-			if err := rows.Scan(&name, &value); err == nil {
-				metrics[name] = value
+			if err := rows.Scan(&name, &value); err != nil {
+				errs = append(errs, fmt.Errorf("failed to scan gauge row: %w", err))
+				continue
 			}
+			metrics[name] = value
 		}
-		// Добавляем проверку ошибок после итерации
 		if err := rows.Err(); err != nil {
-			fmt.Printf("Error after iterating gauge rows: %v\n", err)
+			errs = append(errs, fmt.Errorf("error after iterating gauge rows: %w", err))
 		}
 	}
 
 	// Получаем counter метрики
 	rows, err = s.db.QueryContext(s.ctx, `SELECT name, value FROM counters`)
-	if err == nil {
+	if err != nil {
+		errs = append(errs, fmt.Errorf("failed to get counters: %w", err))
+	} else {
 		defer rows.Close()
 		for rows.Next() {
 			var name string
 			var value int64
-			if err := rows.Scan(&name, &value); err == nil {
-				metrics[name] = value
+			if err := rows.Scan(&name, &value); err != nil {
+				errs = append(errs, fmt.Errorf("failed to scan counter row: %w", err))
+				continue
 			}
+			metrics[name] = value
 		}
-		// Добавляем проверку ошибок после итерации
 		if err := rows.Err(); err != nil {
-			fmt.Printf("Error after iterating counter rows: %v\n", err)
+			errs = append(errs, fmt.Errorf("error after iterating counter rows: %w", err))
 		}
 	}
 
-	return metrics
+	// Если были ошибки, возвращаем частичный результат с ошибкой
+	if len(errs) > 0 {
+		return metrics, fmt.Errorf("partial metrics retrieved with errors: %v", errors.Join(errs...))
+	}
+
+	return metrics, nil
+}
+
+// DatabaseRunner интерфейс для выполнения SQL запросов
+type DatabaseRunner interface {
+	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
 }
 
 func (s *PostgresStorage) UpdateMetrics(metrics []models.Metrics) error {
@@ -214,13 +230,21 @@ func (s *PostgresStorage) UpdateMetrics(metrics []models.Metrics) error {
 	}
 	defer tx.Rollback()
 
+	if err := s.updateMetrics(tx, metrics); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (s *PostgresStorage) updateMetrics(runner DatabaseRunner, metrics []models.Metrics) error {
 	for _, metric := range metrics {
 		switch metric.MType {
 		case "gauge":
 			if metric.Value == nil {
 				continue
 			}
-			_, err = tx.ExecContext(s.ctx, `
+			_, err := runner.ExecContext(s.ctx, `
                 INSERT INTO gauges (name, value) 
                 VALUES ($1, $2)
                 ON CONFLICT (name) 
@@ -234,7 +258,7 @@ func (s *PostgresStorage) UpdateMetrics(metrics []models.Metrics) error {
 			if metric.Delta == nil {
 				continue
 			}
-			_, err = tx.ExecContext(s.ctx, `
+			_, err := runner.ExecContext(s.ctx, `
                 INSERT INTO counters (name, value) 
                 VALUES ($1, $2)
                 ON CONFLICT (name) 
@@ -245,8 +269,7 @@ func (s *PostgresStorage) UpdateMetrics(metrics []models.Metrics) error {
 			}
 		}
 	}
-
-	return tx.Commit()
+	return nil
 }
 
 func (s *PostgresStorage) updateWithRetry(fn func() error) error {
@@ -270,48 +293,6 @@ func (s *PostgresStorage) updateWithRetry(fn func() error) error {
 	}
 
 	return fmt.Errorf("after %d attempts, last error: %w", maxRetries+1, lastErr)
-}
-
-func (s *PostgresStorage) updateMetricsTransaction(metrics []models.Metrics) error {
-	tx, err := s.db.BeginTx(s.ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin transaction error: %w", err)
-	}
-	defer tx.Rollback()
-
-	for _, metric := range metrics {
-		switch metric.MType {
-		case "gauge":
-			if metric.Value == nil {
-				continue
-			}
-			_, err = tx.ExecContext(s.ctx, `
-				INSERT INTO gauges (name, value)
-				VALUES ($1, $2)
-				ON CONFLICT (name)q
-				DO UPDATE SET value = EXCLUDED.value
-			`, metric.ID, *metric.Value)
-			if err != nil {
-				return fmt.Errorf("update gauge error: %w", err)
-			}
-
-		case "counter":
-			if metric.Delta == nil {
-				continue
-			}
-			_, err = tx.ExecContext(s.ctx, `
-				INSERT INTO counters (name, value)
-				VALUES ($1, $2)
-				ON CONFLICT (name)
-				DO UPDATE SET value = counters.value + EXCLUDED.value
-			`, metric.ID, *metric.Delta)
-			if err != nil {
-				return fmt.Errorf("update counter error: %w", err)
-			}
-		}
-	}
-
-	return tx.Commit()
 }
 
 func (s *PostgresStorage) SaveToFile(filename string) error {

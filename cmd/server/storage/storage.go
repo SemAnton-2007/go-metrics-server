@@ -14,7 +14,7 @@ type MemStorage interface {
 	UpdateCounter(name string, value int64)
 	GetGauge(name string) (float64, error)
 	GetCounter(name string) (int64, error)
-	GetAllMetrics() map[string]interface{}
+	GetAllMetrics() (map[string]interface{}, error) // Измененная сигнатура
 	SaveToFile(filename string) error
 	LoadFromFile(filename string) error
 	UpdateMetrics(metrics []models.Metrics) error
@@ -65,7 +65,7 @@ func (s *memStorage) GetCounter(name string) (int64, error) {
 	return 0, errors.New("counter not found")
 }
 
-func (s *memStorage) GetAllMetrics() map[string]interface{} {
+func (s *memStorage) GetAllMetrics() (map[string]interface{}, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -76,7 +76,7 @@ func (s *memStorage) GetAllMetrics() map[string]interface{} {
 	for name, value := range s.counters {
 		metrics[name] = value
 	}
-	return metrics
+	return metrics, nil
 }
 
 func (s *memStorage) SaveToFile(filename string) error {

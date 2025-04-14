@@ -16,6 +16,10 @@ import (
 )
 
 func main() {
+	// Создаем основной контекст приложения
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	cfg := config.NewConfig()
 
 	var db *database.DB
@@ -32,7 +36,7 @@ func main() {
 		log.Println("Connected to PostgreSQL database")
 
 		// Используем PostgresStorage как основное хранилище
-		pgStorage, err := storage.NewPostgresStorage(db.DB)
+		pgStorage, err := storage.NewPostgresStorage(ctx, db.DB)
 		if err != nil {
 			log.Fatalf("Failed to initialize Postgres storage: %v\n", err)
 		}
@@ -103,9 +107,9 @@ func main() {
 	}
 
 	// Graceful shutdown сервера
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("Server shutdown error: %v\n", err)
 	}
 	log.Println("Server stopped")

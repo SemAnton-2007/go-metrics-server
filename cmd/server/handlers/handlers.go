@@ -82,7 +82,11 @@ func GetMetricValueHandler(storage storage.MemStorage) http.HandlerFunc {
 // GetAllMetricsHandler — обработчик для получения всех метрик в HTML
 func GetAllMetricsHandler(storage storage.MemStorage) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		metrics := storage.GetAllMetrics()
+		metrics, err := storage.GetAllMetrics()
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get metrics: %v", err), http.StatusInternalServerError)
+			return
+		}
 
 		// Явно устанавливаем Content-Type
 		w.Header().Set("Content-Type", "text/html")

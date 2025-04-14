@@ -13,10 +13,12 @@ import (
 )
 
 const (
-	httpScheme  = "http://"
-	httpsScheme = "https://"
-	maxRetries  = 3
-	retryDelay  = time.Second
+	httpScheme        = "http://"
+	httpsScheme       = "https://"
+	maxRetries        = 3
+	initialRetryDelay = time.Second     // Первая задержка - 1s
+	secondRetryDelay  = 3 * time.Second // Вторая задержка - 3s
+	thirdRetryDelay   = 5 * time.Second // Третья задержка - 5s
 )
 
 var retryableErrors = []error{
@@ -42,7 +44,10 @@ func NewClient(serverURL string) *Client {
 
 // SendMetric - отправляет одну метрику (сохраняем старый функционал для совместимости)
 func (c *Client) SendMetric(metricType, name string, value interface{}) error {
-	metric := c.createMetric(metricType, name, value)
+	metric, err := c.createMetric(metricType, name, value)
+	if err != nil {
+		return err
+	}
 	return c.sendWithRetry("/update/", []models.Metrics{metric})
 }
 
@@ -74,25 +79,35 @@ func (c *Client) SendMetricsBatch(metrics map[string]interface{}) error {
 	return c.sendRequest("/updates/", batch)
 }
 
-func (c *Client) createMetric(metricType, name string, value interface{}) models.Metrics {
+func (c *Client) createMetric(metricType, name string, value interface{}) (models.Metrics, error) {
 	metric := models.Metrics{
 		ID:    name,
 		MType: metricType,
 	}
 
-	switch v := value.(type) {
-	case float64:
-		metric.Value = &v
-	case int64:
-		metric.Delta = &v
+	switch metricType {
+	case "gauge":
+		if v, ok := value.(float64); ok {
+			metric.Value = &v
+		} else {
+			return models.Metrics{}, fmt.Errorf("invalid value type for gauge metric, expected float64, got %T", value)
+		}
+	case "counter":
+		if v, ok := value.(int64); ok {
+			metric.Delta = &v
+		} else {
+			return models.Metrics{}, fmt.Errorf("invalid value type for counter metric, expected int64, got %T", value)
+		}
+	default:
+		return models.Metrics{}, fmt.Errorf("unknown metric type: %s", metricType)
 	}
 
-	return metric
+	return metric, nil
 }
 
 func (c *Client) sendWithRetry(endpoint string, metrics []models.Metrics) error {
 	var lastErr error
-	delays := []time.Duration{retryDelay, 3 * retryDelay, 5 * retryDelay}
+	delays := []time.Duration{initialRetryDelay, secondRetryDelay, thirdRetryDelay}
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
