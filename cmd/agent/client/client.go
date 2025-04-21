@@ -3,6 +3,9 @@ package client
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,15 +33,17 @@ var retryableErrors = []error{
 type Client struct {
 	ServerURL string
 	Client    *http.Client
+	Key       string // Ключ для подписи данных
 }
 
-func NewClient(serverURL string) *Client {
+func NewClient(serverURL, key string) *Client {
 	if !strings.HasPrefix(serverURL, httpScheme) && !strings.HasPrefix(serverURL, httpsScheme) {
 		serverURL = httpScheme + serverURL
 	}
 	return &Client{
 		ServerURL: serverURL,
 		Client:    &http.Client{Timeout: 10 * time.Second},
+		Key:       key,
 	}
 }
 
@@ -165,6 +170,14 @@ func (c *Client) sendRequest(endpoint string, metrics []models.Metrics) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Accept-Encoding", "gzip")
+
+	// Добавляем подпись, если ключ установлен
+	if c.Key != "" {
+		h := hmac.New(sha256.New, []byte(c.Key))
+		h.Write(jsonData)
+		hash := hex.EncodeToString(h.Sum(nil))
+		req.Header.Set("HashSHA256", hash)
+	}
 
 	resp, err := c.Client.Do(req)
 	if err != nil {

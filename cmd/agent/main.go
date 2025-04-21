@@ -11,7 +11,7 @@ import (
 func main() {
 	cfg := config.NewConfig()
 	metricsCollector := metrics.NewMetrics()
-	client := client.NewClient(cfg.ServerAddr)
+	client := client.NewClient(cfg.ServerAddr, cfg.Key)
 
 	// Канал для синхронизации доступа к метрикам
 	metricsChan := make(chan struct{}, 1)
