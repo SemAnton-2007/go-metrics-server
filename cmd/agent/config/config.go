@@ -14,6 +14,7 @@ type Config struct {
 	PollInterval   time.Duration // Интервал опроса метрик
 	ReportInterval time.Duration // Интервал отправки метрик
 	Key            string        // Ключ для подписи данных
+	RateLimit      int           // Ограничение количества одновременных запросов
 }
 
 func NewConfig() *Config {
@@ -24,6 +25,7 @@ func NewConfig() *Config {
 	defaultPollInterval := 2
 	defaultReportInterval := 10
 	defaultKey := ""
+	defaultRateLimit := 1
 
 	// Получаем значения из переменных окружения
 	if addr := os.Getenv("ADDRESS"); addr != "" {
@@ -42,6 +44,11 @@ func NewConfig() *Config {
 	if key := os.Getenv("KEY"); key != "" {
 		defaultKey = key
 	}
+	if rateLimitStr := os.Getenv("RATE_LIMIT"); rateLimitStr != "" {
+		if rateLimit, err := strconv.Atoi(rateLimitStr); err == nil {
+			defaultRateLimit = rateLimit
+		}
+	}
 
 	// Используем локальный FlagSet для изоляции флагов
 	fs := flag.NewFlagSet("config", flag.ContinueOnError)
@@ -49,6 +56,7 @@ func NewConfig() *Config {
 	pollInterval := fs.Int("p", defaultPollInterval, "Интервал опроса метрик (в секундах)")
 	reportInterval := fs.Int("r", defaultReportInterval, "Интервал отправки метрик (в секундах)")
 	fs.StringVar(&cfg.Key, "k", defaultKey, "Ключ для подписи данных")
+	fs.IntVar(&cfg.RateLimit, "l", defaultRateLimit, "Ограничение количества одновременных запросов")
 
 	// Фильтруем аргументы, чтобы игнорировать флаги go test
 	args := filterArgs(os.Args[1:]) // Игнорируем первый аргумент (имя программы)

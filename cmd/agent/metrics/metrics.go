@@ -1,10 +1,14 @@
 package metrics
 
 import (
+	"fmt"
 	"math/rand"
 	"runtime"
 	"sync"
 	"time"
+
+	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/mem"
 )
 
 type Metrics struct {
@@ -26,11 +30,8 @@ func (m *Metrics) Update() {
 	defer m.mu.Unlock()
 
 	m.PollCount++
-
 	m.RandomValue = rand.Float64()
-
 	runtime.ReadMemStats(&m.Runtime)
-
 	m.lastPoll = time.Now()
 }
 
@@ -72,6 +73,21 @@ func (m *Metrics) GetMetrics() map[string]interface{} {
 	metrics["StackSys"] = float64(m.Runtime.StackSys)
 	metrics["Sys"] = float64(m.Runtime.Sys)
 	metrics["TotalAlloc"] = float64(m.Runtime.TotalAlloc)
+
+	// Добавляем метрики из gopsutil
+	v, err := mem.VirtualMemory()
+	if err == nil {
+		metrics["TotalMemory"] = float64(v.Total)
+		metrics["FreeMemory"] = float64(v.Free)
+	}
+
+	// CPU utilization
+	percents, err := cpu.Percent(0, true)
+	if err == nil {
+		for i, percent := range percents {
+			metrics[fmt.Sprintf("CPUutilization%d", i+1)] = percent
+		}
+	}
 
 	return metrics
 }

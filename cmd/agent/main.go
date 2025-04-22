@@ -5,6 +5,7 @@ import (
 	"go-metrics-server/cmd/agent/config"
 	"go-metrics-server/cmd/agent/metrics"
 	"log"
+	"sync"
 	"time"
 )
 
@@ -13,26 +14,48 @@ func main() {
 	metricsCollector := metrics.NewMetrics()
 	client := client.NewClient(cfg.ServerAddr, cfg.Key)
 
-	// Канал для синхронизации доступа к метрикам
-	metricsChan := make(chan struct{}, 1)
+	// Каналы для обмена данными между горутинами
+	metricsChan := make(chan map[string]interface{})
+	done := make(chan struct{})
+	var wg sync.WaitGroup
 
-	// Запускаем сбор метрик
+	// Worker pool для ограничения количества одновременных запросов
+	for i := 0; i < cfg.RateLimit; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for metrics := range metricsChan {
+				if err := client.SendMetricsBatch(metrics); err != nil {
+					log.Printf("Failed to send metrics batch: %v", err)
+				}
+			}
+		}()
+	}
+
+	// Запускаем сбор метрик в отдельной горутине
 	go func() {
 		for range time.Tick(cfg.PollInterval) {
-			metricsChan <- struct{}{} // Захватываем канал
 			metricsCollector.Update()
-			<-metricsChan // Освобождаем канал
 		}
 	}()
 
-	// Запускаем отправку метрик
-	for range time.Tick(cfg.ReportInterval) {
-		metricsChan <- struct{}{} // Захватываем канал
-		metricsSnapshot := metricsCollector.GetMetrics()
-		<-metricsChan // Освобождаем канал
-
-		if err := client.SendMetricsBatch(metricsSnapshot); err != nil {
-			log.Printf("Failed to send metrics batch: %v", err)
+	// Запускаем отправку метрик в отдельной горутине
+	go func() {
+		for range time.Tick(cfg.ReportInterval) {
+			metricsSnapshot := metricsCollector.GetMetrics()
+			select {
+			case metricsChan <- metricsSnapshot:
+				// Метрики отправлены в worker pool
+			default:
+				log.Println("Rate limit exceeded, skipping metrics send")
+			}
 		}
-	}
+	}()
+
+	// Ожидаем сигнала завершения
+	<-done
+
+	// Завершаем работу
+	close(metricsChan)
+	wg.Wait()
 }
