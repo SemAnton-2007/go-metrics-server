@@ -1,4 +1,4 @@
-package client
+package sender
 
 import (
 	"net/http"
@@ -8,30 +8,25 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestClient_SendMetric(t *testing.T) {
-	// Тестовый сервер
+func TestSender_SendMetric(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer ts.Close()
 
-	// Тест 1: Успешная отправка
-	client := NewClient(ts.URL, "")
-	err := client.SendMetric("gauge", "test", 123.45)
+	s := New(ts.URL, "")
+	err := s.SendMetric("gauge", "test", 123.45)
 	assert.NoError(t, err)
 
-	// Тест 2: Ошибка сервера
 	ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer ts.Close()
 
-	client = NewClient(ts.URL, "")
-	err = client.SendMetric("gauge", "test", 123.45)
+	s = New(ts.URL, "")
+	err = s.SendMetric("gauge", "test", 123.45)
 	assert.Error(t, err)
 }
-
-// Добавляем в конец файла
 
 func TestSendMetricJSON(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -41,15 +36,15 @@ func TestSendMetricJSON(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	c := NewClient(ts.URL, "")
+	s := New(ts.URL, "")
 
 	t.Run("send gauge", func(t *testing.T) {
-		err := c.SendMetric("gauge", "test", 1.23)
+		err := s.SendMetric("gauge", "test", 1.23)
 		assert.NoError(t, err)
 	})
 
 	t.Run("send counter", func(t *testing.T) {
-		err := c.SendMetric("counter", "test", int64(10))
+		err := s.SendMetric("counter", "test", int64(10))
 		assert.NoError(t, err)
 	})
 }
@@ -63,15 +58,15 @@ func TestHashHeader(t *testing.T) {
 	defer ts.Close()
 
 	t.Run("without key", func(t *testing.T) {
-		c := NewClient(ts.URL, "")
-		err := c.SendMetric("gauge", "test", 1.23)
+		s := New(ts.URL, "")
+		err := s.SendMetric("gauge", "test", 1.23)
 		assert.NoError(t, err)
 		assert.Empty(t, receivedHash)
 	})
 
 	t.Run("with key", func(t *testing.T) {
-		c := NewClient(ts.URL, "testkey")
-		err := c.SendMetric("gauge", "test", 1.23)
+		s := New(ts.URL, "testkey")
+		err := s.SendMetric("gauge", "test", 1.23)
 		assert.NoError(t, err)
 		assert.NotEmpty(t, receivedHash)
 	})

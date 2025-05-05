@@ -1,4 +1,4 @@
-package client
+package sender
 
 import (
 	"bytes"
@@ -19,9 +19,9 @@ const (
 	httpScheme        = "http://"
 	httpsScheme       = "https://"
 	maxRetries        = 3
-	initialRetryDelay = time.Second     // Первая задержка - 1s
-	secondRetryDelay  = 3 * time.Second // Вторая задержка - 3s
-	thirdRetryDelay   = 5 * time.Second // Третья задержка - 5s
+	initialRetryDelay = time.Second
+	secondRetryDelay  = 3 * time.Second
+	thirdRetryDelay   = 5 * time.Second
 )
 
 var retryableErrors = []error{
@@ -30,34 +30,32 @@ var retryableErrors = []error{
 	errors.New("i/o timeout"),
 }
 
-type Client struct {
+type Sender struct {
 	ServerURL string
 	Client    *http.Client
-	Key       string // Ключ для подписи данных
+	Key       string
 }
 
-func NewClient(serverURL, key string) *Client {
+func New(serverURL, key string) *Sender {
 	if !strings.HasPrefix(serverURL, httpScheme) && !strings.HasPrefix(serverURL, httpsScheme) {
 		serverURL = httpScheme + serverURL
 	}
-	return &Client{
+	return &Sender{
 		ServerURL: serverURL,
 		Client:    &http.Client{Timeout: 10 * time.Second},
 		Key:       key,
 	}
 }
 
-// SendMetric - отправляет одну метрику (сохраняем старый функционал для совместимости)
-func (c *Client) SendMetric(metricType, name string, value interface{}) error {
-	metric, err := c.createMetric(metricType, name, value)
+func (s *Sender) SendMetric(metricType, name string, value interface{}) error {
+	metric, err := s.createMetric(metricType, name, value)
 	if err != nil {
 		return err
 	}
-	return c.sendWithRetry("/update/", []models.Metrics{metric})
+	return s.sendWithRetry("/update/", []models.Metrics{metric})
 }
 
-// SendMetricsBatch - отправляет метрики батчем (новый функционал)
-func (c *Client) SendMetricsBatch(metrics map[string]interface{}) error {
+func (s *Sender) SendMetricsBatch(metrics map[string]interface{}) error {
 	var batch []models.Metrics
 
 	for name, value := range metrics {
@@ -81,10 +79,10 @@ func (c *Client) SendMetricsBatch(metrics map[string]interface{}) error {
 		return nil
 	}
 
-	return c.sendRequest("/updates/", batch)
+	return s.sendRequest("/updates/", batch)
 }
 
-func (c *Client) createMetric(metricType, name string, value interface{}) (models.Metrics, error) {
+func (s *Sender) createMetric(metricType, name string, value interface{}) (models.Metrics, error) {
 	metric := models.Metrics{
 		ID:    name,
 		MType: metricType,
@@ -110,7 +108,7 @@ func (c *Client) createMetric(metricType, name string, value interface{}) (model
 	return metric, nil
 }
 
-func (c *Client) sendWithRetry(endpoint string, metrics []models.Metrics) error {
+func (s *Sender) sendWithRetry(endpoint string, metrics []models.Metrics) error {
 	var lastErr error
 	delays := []time.Duration{initialRetryDelay, secondRetryDelay, thirdRetryDelay}
 
@@ -119,13 +117,13 @@ func (c *Client) sendWithRetry(endpoint string, metrics []models.Metrics) error 
 			time.Sleep(delays[attempt-1])
 		}
 
-		err := c.sendRequest(endpoint, metrics)
+		err := s.sendRequest(endpoint, metrics)
 		if err == nil {
 			return nil
 		}
 
 		lastErr = err
-		if !c.isRetryableError(err) {
+		if !s.isRetryableError(err) {
 			break
 		}
 	}
@@ -133,7 +131,7 @@ func (c *Client) sendWithRetry(endpoint string, metrics []models.Metrics) error 
 	return fmt.Errorf("after %d attempts, last error: %w", maxRetries+1, lastErr)
 }
 
-func (c *Client) isRetryableError(err error) bool {
+func (s *Sender) isRetryableError(err error) bool {
 	errStr := err.Error()
 	for _, retryableErr := range retryableErrors {
 		if strings.Contains(errStr, retryableErr.Error()) {
@@ -143,7 +141,7 @@ func (c *Client) isRetryableError(err error) bool {
 	return false
 }
 
-func (c *Client) sendRequest(endpoint string, metrics []models.Metrics) error {
+func (s *Sender) sendRequest(endpoint string, metrics []models.Metrics) error {
 	jsonData, err := json.Marshal(metrics)
 	if err != nil {
 		return fmt.Errorf("failed to marshal metrics: %w", err)
@@ -160,7 +158,7 @@ func (c *Client) sendRequest(endpoint string, metrics []models.Metrics) error {
 
 	req, err := http.NewRequest(
 		http.MethodPost,
-		fmt.Sprintf("%s%s", c.ServerURL, endpoint),
+		fmt.Sprintf("%s%s", s.ServerURL, endpoint),
 		&buf,
 	)
 	if err != nil {
@@ -171,15 +169,14 @@ func (c *Client) sendRequest(endpoint string, metrics []models.Metrics) error {
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Accept-Encoding", "gzip")
 
-	// Добавляем подпись, если ключ установлен
-	if c.Key != "" {
-		h := hmac.New(sha256.New, []byte(c.Key))
+	if s.Key != "" {
+		h := hmac.New(sha256.New, []byte(s.Key))
 		h.Write(jsonData)
 		hash := hex.EncodeToString(h.Sum(nil))
 		req.Header.Set("HashSHA256", hash)
 	}
 
-	resp, err := c.Client.Do(req)
+	resp, err := s.Client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send request: %w", err)
 	}

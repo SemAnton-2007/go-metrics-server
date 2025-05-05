@@ -39,13 +39,11 @@ func (m *Metrics) GetMetrics() map[string]interface{} {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Создаем копию метрик для безопасного доступа
 	metrics := map[string]interface{}{
 		"PollCount":   m.PollCount,
 		"RandomValue": m.RandomValue,
 	}
 
-	// Добавляем runtime метрики
 	metrics["Alloc"] = float64(m.Runtime.Alloc)
 	metrics["BuckHashSys"] = float64(m.Runtime.BuckHashSys)
 	metrics["Frees"] = float64(m.Runtime.Frees)
@@ -74,14 +72,12 @@ func (m *Metrics) GetMetrics() map[string]interface{} {
 	metrics["Sys"] = float64(m.Runtime.Sys)
 	metrics["TotalAlloc"] = float64(m.Runtime.TotalAlloc)
 
-	// Добавляем метрики из gopsutil
 	v, err := mem.VirtualMemory()
 	if err == nil {
 		metrics["TotalMemory"] = float64(v.Total)
 		metrics["FreeMemory"] = float64(v.Free)
 	}
 
-	// CPU utilization
 	percents, err := cpu.Percent(0, true)
 	if err == nil {
 		for i, percent := range percents {
