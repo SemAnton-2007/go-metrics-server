@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -19,7 +20,7 @@ func (m *mockPinger) Ping(ctx context.Context) error {
 	return m.pingErr
 }
 
-func TestPingHandler(t *testing.T) {
+func TestPingHandlers(t *testing.T) {
 	tests := []struct {
 		name       string
 		pingErr    error
@@ -36,7 +37,7 @@ func TestPingHandler(t *testing.T) {
 			name:       "failed ping",
 			pingErr:    assert.AnError,
 			wantStatus: http.StatusInternalServerError,
-			wantBody:   "Database connection failed\n",
+			wantBody:   "Database connection failed",
 		},
 	}
 
@@ -52,15 +53,15 @@ func TestPingHandler(t *testing.T) {
 			// Создаем ResponseRecorder для записи ответа
 			rr := httptest.NewRecorder()
 
-			// Вызываем обработчик
-			handler := PingHandler(db)
-			handler.ServeHTTP(rr, req)
+			// Вызываем обработчик через новую структуру
+			handler := NewPingHandler(db)
+			handler.Ping(rr, req)
 
 			// Проверяем статус код
 			assert.Equal(t, tt.wantStatus, rr.Code)
 
 			// Проверяем тело ответа
-			assert.Equal(t, tt.wantBody, rr.Body.String())
+			assert.Equal(t, tt.wantBody, strings.TrimSpace(rr.Body.String()))
 		})
 	}
 }
@@ -79,9 +80,9 @@ func TestPingHandler_ContextCancel(t *testing.T) {
 	// Создаем ResponseRecorder
 	rr := httptest.NewRecorder()
 
-	// Вызываем обработчик
-	handler := PingHandler(db)
-	handler.ServeHTTP(rr, req)
+	// Вызываем обработчик через новую структуру
+	handler := NewPingHandler(db)
+	handler.Ping(rr, req)
 
 	// Проверяем что получили 500 при отмене контекста
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)

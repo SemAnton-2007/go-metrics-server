@@ -9,15 +9,16 @@ import (
 	"testing"
 
 	"go-metrics-server/internal/models"
-	"go-metrics-server/internal/server/storage"
+	"go-metrics-server/internal/server/repository"
+	"go-metrics-server/internal/server/service"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestUpdateMetricHandler(t *testing.T) {
-	storage := storage.NewMemStorage()
-	handler := UpdateMetricHandler(storage)
+	repo := repository.NewMemoryRepository()
+	handler := NewMetricHandler(service.NewMetricService(repo))
 
 	// Тест 1: Успешное обновление gauge
 	req := httptest.NewRequest(http.MethodPost, "/update/gauge/test/123.45", nil)
@@ -28,7 +29,7 @@ func TestUpdateMetricHandler(t *testing.T) {
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 
 	w := httptest.NewRecorder()
-	handler(w, req)
+	handler.UpdateMetric(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "OK", w.Body.String())
 
@@ -41,7 +42,7 @@ func TestUpdateMetricHandler(t *testing.T) {
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 
 	w = httptest.NewRecorder()
-	handler(w, req)
+	handler.UpdateMetric(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "OK", w.Body.String())
 
@@ -54,7 +55,7 @@ func TestUpdateMetricHandler(t *testing.T) {
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 
 	w = httptest.NewRecorder()
-	handler(w, req)
+	handler.UpdateMetric(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 
 	// Тест 4: Некорректное значение gauge
@@ -66,7 +67,7 @@ func TestUpdateMetricHandler(t *testing.T) {
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 
 	w = httptest.NewRecorder()
-	handler(w, req)
+	handler.UpdateMetric(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 
 	// Тест 5: Некорректное значение counter
@@ -78,7 +79,7 @@ func TestUpdateMetricHandler(t *testing.T) {
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 
 	w = httptest.NewRecorder()
-	handler(w, req)
+	handler.UpdateMetric(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 
 	// Тест 6: Отсутствует имя метрики
@@ -90,15 +91,13 @@ func TestUpdateMetricHandler(t *testing.T) {
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 
 	w = httptest.NewRecorder()
-	handler(w, req)
+	handler.UpdateMetric(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
-// Новые тесты для GetMetricValueHandler и GetAllMetricsHandler
-
 func TestGetMetricValueHandler(t *testing.T) {
-	storage := storage.NewMemStorage()
-	handler := GetMetricValueHandler(storage)
+	repo := repository.NewMemoryRepository()
+	handler := NewMetricHandler(service.NewMetricService(repo))
 
 	// Тест 1: Метрика не найдена
 	req := httptest.NewRequest(http.MethodGet, "/value/gauge/test", nil)
@@ -108,11 +107,11 @@ func TestGetMetricValueHandler(t *testing.T) {
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 
 	w := httptest.NewRecorder()
-	handler(w, req)
+	handler.GetMetricValue(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 
 	// Тест 2: Успешное получение метрики gauge
-	storage.UpdateGauge("test", 123.45)
+	repo.UpdateGauge(context.Background(), "test", 123.45)
 	req = httptest.NewRequest(http.MethodGet, "/value/gauge/test", nil)
 	rctx = chi.NewRouteContext()
 	rctx.URLParams.Add("type", "gauge")
@@ -120,12 +119,12 @@ func TestGetMetricValueHandler(t *testing.T) {
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 
 	w = httptest.NewRecorder()
-	handler(w, req)
+	handler.GetMetricValue(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "123.45", w.Body.String())
 
 	// Тест 3: Успешное получение метрики counter
-	storage.UpdateCounter("test", 10)
+	repo.UpdateCounter(context.Background(), "test", 10)
 	req = httptest.NewRequest(http.MethodGet, "/value/counter/test", nil)
 	rctx = chi.NewRouteContext()
 	rctx.URLParams.Add("type", "counter")
@@ -133,7 +132,7 @@ func TestGetMetricValueHandler(t *testing.T) {
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 
 	w = httptest.NewRecorder()
-	handler(w, req)
+	handler.GetMetricValue(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "10", w.Body.String())
 
@@ -145,30 +144,28 @@ func TestGetMetricValueHandler(t *testing.T) {
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 
 	w = httptest.NewRecorder()
-	handler(w, req)
+	handler.GetMetricValue(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestGetAllMetricsHandler(t *testing.T) {
-	storage := storage.NewMemStorage()
-	handler := GetAllMetricsHandler(storage)
+	repo := repository.NewMemoryRepository()
+	handler := NewMetricHandler(service.NewMetricService(repo))
 
 	// Тест 1: Успешное получение всех метрик
-	storage.UpdateGauge("test_gauge", 123.45)
-	storage.UpdateCounter("test_counter", 10)
+	repo.UpdateGauge(context.Background(), "test_gauge", 123.45)
+	repo.UpdateCounter(context.Background(), "test_counter", 10)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
-	handler(w, req)
+	handler.GetAllMetrics(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "test_gauge: 123.45")
 	assert.Contains(t, w.Body.String(), "test_counter: 10")
 }
 
-// Добавляем в конец файла
-
 func TestUpdateMetricJSONHandler(t *testing.T) {
-	store := storage.NewMemStorage()
-	handler := UpdateMetricJSONHandler(store)
+	repo := repository.NewMemoryRepository()
+	handler := NewMetricHandler(service.NewMetricService(repo))
 
 	t.Run("success gauge update", func(t *testing.T) {
 		body := `{"id":"test","type":"gauge","value":1.23}`
@@ -176,7 +173,7 @@ func TestUpdateMetricJSONHandler(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 
-		handler(w, req)
+		handler.UpdateMetricJSON(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 
 		var resp models.Metrics
@@ -189,15 +186,15 @@ func TestUpdateMetricJSONHandler(t *testing.T) {
 		req := httptest.NewRequest("POST", "/update/", strings.NewReader(body))
 		w := httptest.NewRecorder()
 
-		handler(w, req)
+		handler.UpdateMetricJSON(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 }
 
 func TestGetMetricValueJSONHandler(t *testing.T) {
-	store := storage.NewMemStorage()
-	handler := GetMetricValueJSONHandler(store)
-	store.UpdateGauge("test", 1.23)
+	repo := repository.NewMemoryRepository()
+	handler := NewMetricHandler(service.NewMetricService(repo))
+	repo.UpdateGauge(context.Background(), "test", 1.23)
 
 	t.Run("success get gauge", func(t *testing.T) {
 		body := `{"id":"test","type":"gauge"}`
@@ -205,7 +202,7 @@ func TestGetMetricValueJSONHandler(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 
-		handler(w, req)
+		handler.GetMetricValueJSON(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 
 		var resp models.Metrics
@@ -219,7 +216,7 @@ func TestGetMetricValueJSONHandler(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 
-		handler(w, req)
+		handler.GetMetricValueJSON(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
 	})
 }

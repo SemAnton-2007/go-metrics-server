@@ -4,9 +4,10 @@ import (
 	"compress/gzip"
 	"go-metrics-server/internal/server/config"
 	"go-metrics-server/internal/server/database"
-	"go-metrics-server/internal/server/handlers"
+	handler "go-metrics-server/internal/server/handlers"
 	"go-metrics-server/internal/server/middleware"
-	"go-metrics-server/internal/server/storage"
+	"go-metrics-server/internal/server/repository"
+	"go-metrics-server/internal/server/service"
 	"io"
 	"net/http"
 	"strings"
@@ -15,37 +16,27 @@ import (
 	"github.com/rs/zerolog"
 )
 
-func NewServer(cfg *config.Config, storage storage.MemStorage, db *database.DB) *http.Server {
+func NewServer(cfg *config.Config, repo repository.MetricRepository, db *database.DB) *http.Server {
 	r := chi.NewRouter()
 
-	// Инициализация логгера
 	logger := zerolog.New(zerolog.NewConsoleWriter()).With().Timestamp().Logger()
-
-	// Добавляем middleware для логирования
 	r.Use(middleware.LoggerMiddleware(logger))
-
 	r.Use(gzipMiddleware)
+	r.Use(jsonContentTypeMiddleware)
 
-	r.Use(jsonContentTypeMiddleware(storage))
+	metricService := service.NewMetricService(repo)
+	metricHandler := handler.NewMetricHandler(metricService)
 
-	// Регистрируем обработчики
-	r.Post("/update/{type}/{name}/{value}", handlers.UpdateMetricHandler(storage))
-	r.Get("/value/{type}/{name}", handlers.GetMetricValueHandler(storage))
-	r.Get("/", handlers.GetAllMetricsHandler(storage))
+	r.Post("/update/{type}/{name}/{value}", metricHandler.UpdateMetric)
+	r.Get("/value/{type}/{name}", metricHandler.GetMetricValue)
+	r.Get("/", metricHandler.GetAllMetrics)
+	r.Post("/update/", metricHandler.UpdateMetricJSON)
+	r.Post("/value/", metricHandler.GetMetricValueJSON)
+	r.Post("/updates/", metricHandler.BatchUpdate)
 
-	// Новые JSON эндпоинты
-	r.Post("/update/", handlers.UpdateMetricJSONHandler(storage))
-	r.Post("/value/", handlers.GetMetricValueJSONHandler(storage))
-
-	// Новый batch endpoint
-	r.Post("/updates/", handlers.BatchUpdateHandler(storage))
-
-	// Новый batch endpoint
-	r.Post("/updates/", handlers.BatchUpdateHandler(storage))
-
-	// Добавляем обработчик для проверки БД, если БД подключена
 	if db != nil {
-		r.Get("/ping", handlers.PingHandler(db))
+		pingHandler := handler.NewPingHandler(db)
+		r.Get("/ping", pingHandler.Ping)
 	}
 
 	return &http.Server{
@@ -61,7 +52,6 @@ func gzipMiddleware(next http.Handler) http.Handler {
 		contentEncoding := r.Header.Get("Content-Encoding")
 		isGzipped := strings.Contains(contentEncoding, "gzip")
 
-		// Распаковка входящего запроса
 		if isGzipped {
 			gz, err := gzip.NewReader(r.Body)
 			if err != nil {
@@ -72,7 +62,6 @@ func gzipMiddleware(next http.Handler) http.Handler {
 			r.Body = gz
 		}
 
-		// Сжатие исходящего ответа
 		if supportsGzip && isCompressibleContent(r) {
 			w.Header().Set("Content-Encoding", "gzip")
 			w.Header().Set("Transfer-Encoding", "chunked")
@@ -81,7 +70,6 @@ func gzipMiddleware(next http.Handler) http.Handler {
 			gz := gzip.NewWriter(w)
 			defer gz.Close()
 
-			// Специальная обработка для HTML
 			if r.Header.Get("Accept") == "text/html" {
 				w.Header().Set("Content-Type", "text/html")
 			}
@@ -94,11 +82,24 @@ func gzipMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+func jsonContentTypeMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
+			switch r.URL.Path {
+			case "/update/", "/value/", "/updates/":
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func isCompressibleContent(r *http.Request) bool {
 	contentType := r.Header.Get("Content-Type")
 	return strings.Contains(contentType, "application/json") ||
 		strings.Contains(contentType, "text/html") ||
-		r.Header.Get("Accept") == "text/html" // Добавляем проверку для Accept: text/html
+		r.Header.Get("Accept") == "text/html"
 }
 
 type gzipResponseWriter struct {
@@ -108,25 +109,4 @@ type gzipResponseWriter struct {
 
 func (w gzipResponseWriter) Write(b []byte) (int, error) {
 	return w.Writer.Write(b)
-}
-
-func jsonContentTypeMiddleware(storage storage.MemStorage) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
-				switch r.URL.Path {
-				case "/update/":
-					handlers.UpdateMetricJSONHandler(storage)(w, r)
-					return
-				case "/value/":
-					handlers.GetMetricValueJSONHandler(storage)(w, r)
-					return
-				case "/updates/":
-					handlers.BatchUpdateHandler(storage)(w, r)
-					return
-				}
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
 }
