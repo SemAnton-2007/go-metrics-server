@@ -2,10 +2,10 @@ package main
 
 import (
 	"context"
-	"go-metrics-server/cmd/server/config"
-	"go-metrics-server/cmd/server/database"
-	"go-metrics-server/cmd/server/storage"
-	"go-metrics-server/cmd/server/webservers"
+	"go-metrics-server/internal/server/config"
+	"go-metrics-server/internal/server/database"
+	"go-metrics-server/internal/server/storage"
+	"go-metrics-server/internal/server/webservers"
 	"log"
 	"net/http"
 	"os"

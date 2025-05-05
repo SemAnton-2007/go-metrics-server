@@ -2,11 +2,11 @@ package webservers
 
 import (
 	"compress/gzip"
-	"go-metrics-server/cmd/server/config"
-	"go-metrics-server/cmd/server/database"
-	"go-metrics-server/cmd/server/handlers"
-	"go-metrics-server/cmd/server/middleware"
-	"go-metrics-server/cmd/server/storage"
+	"go-metrics-server/internal/server/config"
+	"go-metrics-server/internal/server/database"
+	"go-metrics-server/internal/server/handlers"
+	"go-metrics-server/internal/server/middleware"
+	"go-metrics-server/internal/server/storage"
 	"io"
 	"net/http"
 	"strings"

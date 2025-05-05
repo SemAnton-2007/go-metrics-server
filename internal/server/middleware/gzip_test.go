@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"go-metrics-server/cmd/server/middleware"
+	"go-metrics-server/internal/server/middleware"
 )
 
 func TestGzipMiddleware(t *testing.T) {

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"go-metrics-server/cmd/server/storage"
 	"go-metrics-server/internal/models"
+	"go-metrics-server/internal/server/storage"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"

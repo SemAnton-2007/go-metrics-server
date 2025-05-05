@@ -5,9 +5,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"go-metrics-server/cmd/server/config"
-	"go-metrics-server/cmd/server/database"
-	"go-metrics-server/cmd/server/storage"
+	"go-metrics-server/internal/server/config"
+	"go-metrics-server/internal/server/database"
+	"go-metrics-server/internal/server/storage"
 
 	"github.com/stretchr/testify/assert"
 )
