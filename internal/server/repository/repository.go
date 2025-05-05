@@ -114,6 +114,7 @@ func (r *PostgresRepository) GetGauge(ctx context.Context, name string) (float64
 	err := r.db.QueryRowContext(ctx, `
 		SELECT value FROM gauges WHERE name = $1
 	`, name).Scan(&value)
+
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, errors.New("gauge not found")
@@ -128,6 +129,7 @@ func (r *PostgresRepository) GetCounter(ctx context.Context, name string) (int64
 	err := r.db.QueryRowContext(ctx, `
 		SELECT value FROM counters WHERE name = $1
 	`, name).Scan(&value)
+
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, errors.New("counter not found")
@@ -141,6 +143,7 @@ func (r *PostgresRepository) GetAllMetrics(ctx context.Context) (map[string]inte
 	metrics := make(map[string]interface{})
 	var errs []error
 
+	// Получаем gauge метрики
 	rows, err := r.db.QueryContext(ctx, `SELECT name, value FROM gauges`)
 	if err != nil {
 		errs = append(errs, fmt.Errorf("failed to get gauges: %w", err))
@@ -155,8 +158,12 @@ func (r *PostgresRepository) GetAllMetrics(ctx context.Context) (map[string]inte
 			}
 			metrics[name] = value
 		}
+		if err := rows.Err(); err != nil {
+			errs = append(errs, fmt.Errorf("error after iterating gauge rows: %w", err))
+		}
 	}
 
+	// Получаем counter метрики
 	rows, err = r.db.QueryContext(ctx, `SELECT name, value FROM counters`)
 	if err != nil {
 		errs = append(errs, fmt.Errorf("failed to get counters: %w", err))
@@ -170,6 +177,9 @@ func (r *PostgresRepository) GetAllMetrics(ctx context.Context) (map[string]inte
 				continue
 			}
 			metrics[name] = value
+		}
+		if err := rows.Err(); err != nil {
+			errs = append(errs, fmt.Errorf("error after iterating counter rows: %w", err))
 		}
 	}
 
