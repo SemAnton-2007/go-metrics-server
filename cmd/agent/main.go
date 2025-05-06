@@ -1,38 +1,54 @@
 package main
 
 import (
-	"go-metrics-server/cmd/agent/client"
-	"go-metrics-server/cmd/agent/config"
-	"go-metrics-server/cmd/agent/metrics"
+	"go-metrics-server/internal/agent/config"
+	"go-metrics-server/internal/agent/metrics"
+	"go-metrics-server/internal/agent/sender"
 	"log"
+	"sync"
 	"time"
 )
 
 func main() {
 	cfg := config.NewConfig()
 	metricsCollector := metrics.NewMetrics()
-	client := client.NewClient(cfg.ServerAddr)
+	sender := sender.New(cfg.ServerAddr, cfg.Key)
 
-	// Канал для синхронизации доступа к метрикам
-	metricsChan := make(chan struct{}, 1)
+	metricsChan := make(chan map[string]interface{})
+	done := make(chan struct{})
+	var wg sync.WaitGroup
 
-	// Запускаем сбор метрик
+	for i := 0; i < cfg.RateLimit; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for metrics := range metricsChan {
+				if err := sender.SendMetricsBatch(metrics); err != nil {
+					log.Printf("Failed to send metrics batch: %v", err)
+				}
+			}
+		}()
+	}
+
 	go func() {
 		for range time.Tick(cfg.PollInterval) {
-			metricsChan <- struct{}{} // Захватываем канал
 			metricsCollector.Update()
-			<-metricsChan // Освобождаем канал
 		}
 	}()
 
-	// Запускаем отправку метрик
-	for range time.Tick(cfg.ReportInterval) {
-		metricsChan <- struct{}{} // Захватываем канал
-		metricsSnapshot := metricsCollector.GetMetrics()
-		<-metricsChan // Освобождаем канал
-
-		if err := client.SendMetricsBatch(metricsSnapshot); err != nil {
-			log.Printf("Failed to send metrics batch: %v", err)
+	go func() {
+		for range time.Tick(cfg.ReportInterval) {
+			metricsSnapshot := metricsCollector.GetMetrics()
+			select {
+			case metricsChan <- metricsSnapshot:
+			default:
+				log.Println("Rate limit exceeded, skipping metrics send")
+			}
 		}
-	}
+	}()
+
+	<-done
+
+	close(metricsChan)
+	wg.Wait()
 }

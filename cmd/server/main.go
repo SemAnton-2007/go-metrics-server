@@ -2,10 +2,10 @@ package main
 
 import (
 	"context"
-	"go-metrics-server/cmd/server/config"
-	"go-metrics-server/cmd/server/database"
-	"go-metrics-server/cmd/server/storage"
-	"go-metrics-server/cmd/server/webservers"
+	"go-metrics-server/internal/server/config"
+	"go-metrics-server/internal/server/database"
+	"go-metrics-server/internal/server/repository"
+	"go-metrics-server/internal/server/webservers"
 	"log"
 	"net/http"
 	"os"
@@ -24,7 +24,7 @@ func main() {
 
 	var db *database.DB
 	var err error
-	var store storage.MemStorage
+	var repo repository.MetricRepository
 
 	// Инициализируем соединение с БД, если указан DSN
 	if cfg.DatabaseDSN != "" {
@@ -35,19 +35,16 @@ func main() {
 		defer db.Close()
 		log.Println("Connected to PostgreSQL database")
 
-		// Используем PostgresStorage как основное хранилище
-		pgStorage, err := storage.NewPostgresStorage(ctx, db.DB)
+		pgRepo, err := repository.NewPostgresRepository(db.DB)
 		if err != nil {
-			log.Fatalf("Failed to initialize Postgres storage: %v\n", err)
+			log.Fatalf("Failed to initialize Postgres repository: %v\n", err)
 		}
-		store = pgStorage
+		repo = pgRepo
 	} else {
-		// Старая логика с файловым или in-memory хранилищем
-		baseStorage := storage.NewMemStorage()
+		memRepo := repository.NewMemoryRepository()
 
-		// Загрузка данных при старте, если разрешено
 		if cfg.Restore && cfg.FileStorage != "" {
-			if err := baseStorage.LoadFromFile(cfg.FileStorage); err != nil {
+			if err := memRepo.LoadFromFile(ctx, cfg.FileStorage); err != nil {
 				log.Printf("Failed to load metrics from file: %v\n", err)
 			} else {
 				log.Println("Metrics loaded successfully from file")
@@ -57,12 +54,11 @@ func main() {
 		var saveTicker *time.Ticker
 
 		if cfg.StoreInterval > 0 && cfg.FileStorage != "" {
-			// Периодическое сохранение
-			store = baseStorage
+			repo = memRepo
 			saveTicker = time.NewTicker(cfg.StoreInterval)
 			go func() {
 				for range saveTicker.C {
-					if err := store.SaveToFile(cfg.FileStorage); err != nil {
+					if err := repo.SaveToFile(ctx, cfg.FileStorage); err != nil {
 						log.Printf("Failed to save metrics: %v\n", err)
 					} else {
 						log.Println("Metrics saved successfully")
@@ -71,17 +67,15 @@ func main() {
 			}()
 			defer saveTicker.Stop()
 		} else if cfg.FileStorage != "" {
-			// Синхронное сохранение с буферизацией
-			syncStorage := newSyncSaveStorage(baseStorage, cfg.FileStorage)
-			store = syncStorage
-			defer syncStorage.Close()
+			syncRepo := newSyncSaveRepository(memRepo, cfg.FileStorage)
+			repo = syncRepo
+			defer syncRepo.Close()
 		} else {
-			// Сохранение отключено
-			store = baseStorage
+			repo = memRepo
 		}
 	}
 
-	srv := webservers.NewServer(cfg, store, db)
+	srv := webservers.NewServer(cfg, repo, db)
 	log.Printf("Server is running on http://%s\n", cfg.ServerAddr)
 
 	// Обработка graceful shutdown
@@ -99,7 +93,7 @@ func main() {
 
 	// Сохранение данных перед выходом (если не используется БД)
 	if cfg.DatabaseDSN == "" && cfg.FileStorage != "" {
-		if err := store.SaveToFile(cfg.FileStorage); err != nil {
+		if err := repo.SaveToFile(ctx, cfg.FileStorage); err != nil {
 			log.Printf("Failed to save metrics on shutdown: %v\n", err)
 		} else {
 			log.Println("Metrics saved successfully on shutdown")
@@ -115,25 +109,24 @@ func main() {
 	log.Println("Server stopped")
 }
 
-// syncSaveStorage обертка для синхронного сохранения с буферизацией
-type syncSaveStorage struct {
-	storage.MemStorage
+type syncSaveRepository struct {
+	repository.MetricRepository
 	filePath    string
-	buffer      map[string]interface{} // буфер для накопления изменений
-	bufferSize  int                    // текущий размер буфера
-	maxBuffer   int                    // максимальный размер буфера перед сбросом на диск
-	flushTicker *time.Ticker           // тикер для периодического сброса
-	mu          sync.Mutex             // мьютекс для защиты буфера
-	stopChan    chan struct{}          // канал для остановки фоновой горутины
+	buffer      map[string]interface{}
+	bufferSize  int
+	maxBuffer   int
+	flushTicker *time.Ticker
+	mu          sync.Mutex
+	stopChan    chan struct{}
 }
 
-func newSyncSaveStorage(s storage.MemStorage, filePath string) *syncSaveStorage {
-	storage := &syncSaveStorage{
-		MemStorage: s,
-		filePath:   filePath,
-		buffer:     make(map[string]interface{}),
-		maxBuffer:  10, // сбрасываем на диск каждые 10 изменений
-		stopChan:   make(chan struct{}),
+func newSyncSaveRepository(repo repository.MetricRepository, filePath string) *syncSaveRepository {
+	storage := &syncSaveRepository{
+		MetricRepository: repo,
+		filePath:         filePath,
+		buffer:           make(map[string]interface{}),
+		maxBuffer:        10,
+		stopChan:         make(chan struct{}),
 	}
 
 	// Запускаем фоновую горутину для периодического сброса
@@ -143,7 +136,7 @@ func newSyncSaveStorage(s storage.MemStorage, filePath string) *syncSaveStorage 
 	return storage
 }
 
-func (s *syncSaveStorage) backgroundFlush() {
+func (s *syncSaveRepository) backgroundFlush() {
 	for {
 		select {
 		case <-s.flushTicker.C:
@@ -155,7 +148,7 @@ func (s *syncSaveStorage) backgroundFlush() {
 	}
 }
 
-func (s *syncSaveStorage) flush() {
+func (s *syncSaveRepository) flush() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -163,8 +156,7 @@ func (s *syncSaveStorage) flush() {
 		return
 	}
 
-	// Сохраняем все метрики, а не только буферизованные
-	if err := s.MemStorage.SaveToFile(s.filePath); err != nil {
+	if err := s.MetricRepository.SaveToFile(context.Background(), s.filePath); err != nil {
 		log.Printf("Failed to save metrics synchronously: %v\n", err)
 	}
 
@@ -173,17 +165,19 @@ func (s *syncSaveStorage) flush() {
 	s.bufferSize = 0
 }
 
-func (s *syncSaveStorage) UpdateGauge(name string, value float64) {
-	s.MemStorage.UpdateGauge(name, value)
+func (s *syncSaveRepository) UpdateGauge(ctx context.Context, name string, value float64) error {
+	err := s.MetricRepository.UpdateGauge(ctx, name, value)
 	s.bufferUpdate(name, value)
+	return err
 }
 
-func (s *syncSaveStorage) UpdateCounter(name string, value int64) {
-	s.MemStorage.UpdateCounter(name, value)
+func (s *syncSaveRepository) UpdateCounter(ctx context.Context, name string, value int64) error {
+	err := s.MetricRepository.UpdateCounter(ctx, name, value)
 	s.bufferUpdate(name, value)
+	return err
 }
 
-func (s *syncSaveStorage) bufferUpdate(name string, value interface{}) {
+func (s *syncSaveRepository) bufferUpdate(name string, value interface{}) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -196,7 +190,7 @@ func (s *syncSaveStorage) bufferUpdate(name string, value interface{}) {
 	}
 }
 
-func (s *syncSaveStorage) Close() {
+func (s *syncSaveRepository) Close() {
 	close(s.stopChan)
-	s.flush() // финальный сброс перед закрытием
+	s.flush()
 }

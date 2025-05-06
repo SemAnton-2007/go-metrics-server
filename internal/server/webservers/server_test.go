@@ -5,17 +5,17 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"go-metrics-server/cmd/server/config"
-	"go-metrics-server/cmd/server/database"
-	"go-metrics-server/cmd/server/storage"
+	"go-metrics-server/internal/server/config"
+	"go-metrics-server/internal/server/database"
+	"go-metrics-server/internal/server/repository"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestNewServer(t *testing.T) {
 	cfg := &config.Config{ServerAddr: "localhost:8080"}
-	store := storage.NewMemStorage()
-	srv := NewServer(cfg, store, nil) // nil для DB, так как тестируем без БД
+	repo := repository.NewMemoryRepository()
+	srv := NewServer(cfg, repo, nil) // nil для DB, так как тестируем без БД
 
 	// Тест 1: Проверка маршрута /update/
 	ts := httptest.NewServer(srv.Handler)
@@ -40,9 +40,9 @@ func TestNewServer(t *testing.T) {
 
 func TestPingHandler(t *testing.T) {
 	cfg := &config.Config{ServerAddr: "localhost:8080"}
-	store := storage.NewMemStorage()
+	repo := repository.NewMemoryRepository()
 	mockDB := &database.DB{}
-	srv := NewServer(cfg, store, mockDB)
+	srv := NewServer(cfg, repo, mockDB)
 
 	ts := httptest.NewServer(srv.Handler)
 	defer ts.Close()

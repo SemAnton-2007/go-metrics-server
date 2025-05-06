@@ -13,17 +13,19 @@ type Config struct {
 	ServerAddr     string        // Адрес сервера
 	PollInterval   time.Duration // Интервал опроса метрик
 	ReportInterval time.Duration // Интервал отправки метрик
+	Key            string        // Ключ для подписи данных
+	RateLimit      int           // Ограничение количества одновременных запросов
 }
 
 func NewConfig() *Config {
 	cfg := &Config{}
 
-	// Значения по умолчанию
 	defaultServerAddr := "localhost:8080"
 	defaultPollInterval := 2
 	defaultReportInterval := 10
+	defaultKey := ""
+	defaultRateLimit := 1
 
-	// Получаем значения из переменных окружения
 	if addr := os.Getenv("ADDRESS"); addr != "" {
 		defaultServerAddr = addr
 	}
@@ -37,30 +39,35 @@ func NewConfig() *Config {
 			defaultReportInterval = reportInterval
 		}
 	}
+	if key := os.Getenv("KEY"); key != "" {
+		defaultKey = key
+	}
+	if rateLimitStr := os.Getenv("RATE_LIMIT"); rateLimitStr != "" {
+		if rateLimit, err := strconv.Atoi(rateLimitStr); err == nil {
+			defaultRateLimit = rateLimit
+		}
+	}
 
-	// Используем локальный FlagSet для изоляции флагов
 	fs := flag.NewFlagSet("config", flag.ContinueOnError)
 	fs.StringVar(&cfg.ServerAddr, "a", defaultServerAddr, "Адрес HTTP-сервера")
 	pollInterval := fs.Int("p", defaultPollInterval, "Интервал опроса метрик (в секундах)")
 	reportInterval := fs.Int("r", defaultReportInterval, "Интервал отправки метрик (в секундах)")
+	fs.StringVar(&cfg.Key, "k", defaultKey, "Ключ для подписи данных")
+	fs.IntVar(&cfg.RateLimit, "l", defaultRateLimit, "Ограничение количества одновременных запросов")
 
-	// Фильтруем аргументы, чтобы игнорировать флаги go test
-	args := filterArgs(os.Args[1:]) // Игнорируем первый аргумент (имя программы)
+	args := filterArgs(os.Args[1:])
 
-	// Парсим только отфильтрованные аргументы
 	if err := fs.Parse(args); err != nil {
 		fmt.Println("Ошибка при парсинге флагов:", err)
 		os.Exit(1)
 	}
 
-	// Преобразуем интервалы в time.Duration
 	cfg.PollInterval = time.Duration(*pollInterval) * time.Second
 	cfg.ReportInterval = time.Duration(*reportInterval) * time.Second
 
 	return cfg
 }
 
-// filterArgs удаляет флаги go test из списка аргументов
 func filterArgs(args []string) []string {
 	var filtered []string
 	for i := 0; i < len(args); i++ {
