@@ -8,6 +8,7 @@ import (
 	"go-metrics-server/internal/server/webservers"
 	"log"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"sync"
