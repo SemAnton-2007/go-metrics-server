@@ -10,45 +10,51 @@ import (
 )
 
 func main() {
-	cfg := config.NewConfig()
+	RunAgent(config.NewConfig())
+}
+
+func RunAgent(cfg *config.Config) {
 	metricsCollector := metrics.NewMetrics()
 	sender := sender.New(cfg.ServerAddr, cfg.Key)
 
 	metricsChan := make(chan map[string]interface{})
-	done := make(chan struct{})
 	var wg sync.WaitGroup
 
 	for i := 0; i < cfg.RateLimit; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for metrics := range metricsChan {
-				if err := sender.SendMetricsBatch(metrics); err != nil {
+			for m := range metricsChan {
+				if err := sender.SendMetricsBatch(m); err != nil {
 					log.Printf("Failed to send metrics batch: %v", err)
 				}
 			}
 		}()
 	}
 
+	pollTicker := time.NewTicker(cfg.PollInterval)
+	defer pollTicker.Stop()
+
 	go func() {
-		for range time.Tick(cfg.PollInterval) {
+		for range pollTicker.C {
 			metricsCollector.Update()
 		}
 	}()
 
+	reportTicker := time.NewTicker(cfg.ReportInterval)
+	defer reportTicker.Stop()
+
 	go func() {
-		for range time.Tick(cfg.ReportInterval) {
-			metricsSnapshot := metricsCollector.GetMetrics()
+		for range reportTicker.C {
 			select {
-			case metricsChan <- metricsSnapshot:
+			case metricsChan <- metricsCollector.GetMetrics():
 			default:
 				log.Println("Rate limit exceeded, skipping metrics send")
 			}
 		}
 	}()
 
-	<-done
-
+	<-make(chan struct{})
 	close(metricsChan)
 	wg.Wait()
 }
