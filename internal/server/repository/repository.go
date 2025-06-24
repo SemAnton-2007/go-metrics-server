@@ -20,21 +20,42 @@ const (
 	retryDelay = time.Second
 )
 
+// MetricRepository defines the interface for metric storage operations.
+// It provides methods for storing and retrieving gauge and counter metrics,
+// as well as batch operations and persistence.
 type MetricRepository interface {
+	// UpdateGauge updates a gauge metric with the given name and value.
 	UpdateGauge(ctx context.Context, name string, value float64) error
+
+	// UpdateCounter updates a counter metric with the given name and delta value.
 	UpdateCounter(ctx context.Context, name string, value int64) error
+
+	// GetGauge retrieves the current value of a gauge metric by name.
 	GetGauge(ctx context.Context, name string) (float64, error)
+
+	// GetCounter retrieves the current value of a counter metric by name.
 	GetCounter(ctx context.Context, name string) (int64, error)
+
+	// GetAllMetrics retrieves all stored metrics as a map of names to values.
 	GetAllMetrics(ctx context.Context) (map[string]interface{}, error)
+
+	// UpdateMetrics performs a batch update of multiple metrics in a single transaction.
 	UpdateMetrics(ctx context.Context, metrics []models.Metrics) error
+
+	// SaveToFile saves the current metrics to a JSON file
 	SaveToFile(ctx context.Context, filename string) error
+
+	// LoadFromFile loads metrics from a JSON file.
 	LoadFromFile(ctx context.Context, filename string) error
 }
 
+// PostgresRepository implements MetricRepository using PostgreSQL as storage.
 type PostgresRepository struct {
 	db *sql.DB
 }
 
+// NewPostgresRepository creates a new PostgresRepository instance and initializes the database tables.
+// It retries the table creation up to maxRetries times if there are connection issues.
 func NewPostgresRepository(db *sql.DB) (*PostgresRepository, error) {
 	repo := &PostgresRepository{db: db}
 	if err := repo.createTablesWithRetry(context.Background()); err != nil {
@@ -238,12 +259,14 @@ func (r *PostgresRepository) LoadFromFile(ctx context.Context, filename string) 
 	return nil
 }
 
+// MemoryRepository implements MetricRepository using in-memory storage with file persistence.
 type MemoryRepository struct {
 	gauges   map[string]float64
 	counters map[string]int64
 	mu       sync.Mutex
 }
 
+// NewMemoryRepository creates a new MemoryRepository instance with empty metric maps.
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
 		gauges:   make(map[string]float64),

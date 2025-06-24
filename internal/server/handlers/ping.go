@@ -6,18 +6,22 @@ import (
 	"time"
 )
 
+// PingHandler handles health check requests to verify database connectivity.
 type PingHandler struct {
 	db interface {
 		Ping(ctx context.Context) error
 	}
 }
 
+// NewPingHandler creates a new PingHandler instance with the given database connection.
 func NewPingHandler(db interface {
 	Ping(ctx context.Context) error
 }) *PingHandler {
 	return &PingHandler{db: db}
 }
 
+// Ping checks database connectivity and returns appropriate HTTP status.
+// Returns 200 OK if database is reachable, 500 otherwise.
 func (h *PingHandler) Ping(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()

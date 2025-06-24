@@ -14,6 +14,9 @@ var gzipWriterPool = sync.Pool{
 	},
 }
 
+// GzipMiddleware creates a middleware that handles gzip compression.
+// It decompresses incoming requests with Content-Encoding: gzip header
+// and compresses responses when client accepts gzip encoding.
 func GzipMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Распаковка входящего запроса

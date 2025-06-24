@@ -13,14 +13,21 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// MetricHandler handles HTTP requests for metric operations.
+// It validates input and delegates business logic to MetricService.
 type MetricHandler struct {
 	service *service.MetricService
 }
 
+// NewMetricHandler creates a new MetricHandler instance with the given service.
 func NewMetricHandler(service *service.MetricService) *MetricHandler {
 	return &MetricHandler{service: service}
 }
 
+// UpdateMetric handles metric updates via URL parameters.
+// Supports both gauge and counter metrics.
+// Example: POST /update/gauge/temperature/23.5
+// Example: POST /update/counter/requests/1
 func (h *MetricHandler) UpdateMetric(w http.ResponseWriter, r *http.Request) {
 	metricType := chi.URLParam(r, "type")
 	metricName := chi.URLParam(r, "name")
