@@ -19,15 +19,19 @@ const (
 	defaultKey           = ""
 )
 
+// Config holds application configuration parameters.
+// Fields can be set via command line flags or environment variables.
 type Config struct {
-	ServerAddr    string        // Адрес сервера
-	StoreInterval time.Duration // Интервал сохранения на диск
-	FileStorage   string        // Путь к файлу сохранения
-	Restore       bool          // Загружать данные при старте
-	DatabaseDSN   string        // DSN для подключения к БД
-	Key           string        // Ключ для подписи данных
+	ServerAddr    string        // Server address in host:port format (env: ADDRESS, flag: -a)
+	StoreInterval time.Duration // Interval for saving metrics to disk (env: STORE_INTERVAL, flag: -i)
+	FileStorage   string        // Path to metrics storage file (env: FILE_STORAGE_PATH, flag: -f)
+	Restore       bool          // Whether to load metrics at startup (env: RESTORE, flag: -r)
+	DatabaseDSN   string        // PostgreSQL connection DSN (env: DATABASE_DSN, flag: -d)
+	Key           string        // Secret key for hash verification (env: KEY, flag: -k)
 }
 
+// NewConfig creates a new Config instance by parsing command line flags and environment variables.
+// Environment variables take precedence over default values but are overridden by command line flags.
 func NewConfig() *Config {
 	cfg := &Config{}
 

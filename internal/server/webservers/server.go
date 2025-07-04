@@ -11,9 +11,18 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog"
+)
+
+var (
+	gzipWriterPool = sync.Pool{
+		New: func() interface{} {
+			return gzip.NewWriter(nil)
+		},
+	}
 )
 
 func NewServer(cfg *config.Config, repo repository.MetricRepository, db *database.DB) *http.Server {
@@ -67,8 +76,12 @@ func gzipMiddleware(next http.Handler) http.Handler {
 			w.Header().Set("Transfer-Encoding", "chunked")
 			w.Header().Del("Content-Length")
 
-			gz := gzip.NewWriter(w)
-			defer gz.Close()
+			gz := gzipWriterPool.Get().(*gzip.Writer)
+			gz.Reset(w)
+			defer func() {
+				gz.Close()
+				gzipWriterPool.Put(gz)
+			}()
 
 			if r.Header.Get("Accept") == "text/html" {
 				w.Header().Set("Content-Type", "text/html")

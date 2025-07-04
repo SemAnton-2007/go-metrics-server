@@ -8,6 +8,7 @@ import (
 	"go-metrics-server/internal/server/webservers"
 	"log"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"sync"
@@ -16,11 +17,14 @@ import (
 )
 
 func main() {
-	// Создаем основной контекст приложения
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	RunServer(config.NewConfig())
+}
 
-	cfg := config.NewConfig()
+func RunServer(cfg *config.Config) {
+	go func() {
+		log.Println("Debug server running on :6060")
+		log.Fatal(http.ListenAndServe(":6060", nil))
+	}()
 
 	var db *database.DB
 	var err error
@@ -44,7 +48,7 @@ func main() {
 		memRepo := repository.NewMemoryRepository()
 
 		if cfg.Restore && cfg.FileStorage != "" {
-			if err := memRepo.LoadFromFile(ctx, cfg.FileStorage); err != nil {
+			if err := memRepo.LoadFromFile(context.Background(), cfg.FileStorage); err != nil {
 				log.Printf("Failed to load metrics from file: %v\n", err)
 			} else {
 				log.Println("Metrics loaded successfully from file")
@@ -52,24 +56,20 @@ func main() {
 		}
 
 		var saveTicker *time.Ticker
-
 		if cfg.StoreInterval > 0 && cfg.FileStorage != "" {
 			repo = memRepo
 			saveTicker = time.NewTicker(cfg.StoreInterval)
 			go func() {
 				for range saveTicker.C {
-					if err := repo.SaveToFile(ctx, cfg.FileStorage); err != nil {
+					if err := repo.SaveToFile(context.Background(), cfg.FileStorage); err != nil {
 						log.Printf("Failed to save metrics: %v\n", err)
-					} else {
-						log.Println("Metrics saved successfully")
 					}
 				}
 			}()
 			defer saveTicker.Stop()
 		} else if cfg.FileStorage != "" {
-			syncRepo := newSyncSaveRepository(memRepo, cfg.FileStorage)
-			repo = syncRepo
-			defer syncRepo.Close()
+			repo = newSyncSaveRepository(memRepo, cfg.FileStorage)
+			defer repo.(*syncSaveRepository).Close()
 		} else {
 			repo = memRepo
 		}
@@ -78,9 +78,8 @@ func main() {
 	srv := webservers.NewServer(cfg, repo, db)
 	log.Printf("Server is running on http://%s\n", cfg.ServerAddr)
 
-	// Обработка graceful shutdown
-	done := make(chan os.Signal, 1)
-	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -88,21 +87,18 @@ func main() {
 		}
 	}()
 
-	<-done
+	<-stop
 	log.Println("Server is shutting down...")
 
-	// Сохранение данных перед выходом (если не используется БД)
 	if cfg.DatabaseDSN == "" && cfg.FileStorage != "" {
-		if err := repo.SaveToFile(ctx, cfg.FileStorage); err != nil {
+		if err := repo.SaveToFile(context.Background(), cfg.FileStorage); err != nil {
 			log.Printf("Failed to save metrics on shutdown: %v\n", err)
-		} else {
-			log.Println("Metrics saved successfully on shutdown")
 		}
 	}
 
-	// Graceful shutdown сервера
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer shutdownCancel()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("Server shutdown error: %v\n", err)
 	}
@@ -111,86 +107,22 @@ func main() {
 
 type syncSaveRepository struct {
 	repository.MetricRepository
-	filePath    string
-	buffer      map[string]interface{}
-	bufferSize  int
-	maxBuffer   int
-	flushTicker *time.Ticker
-	mu          sync.Mutex
-	stopChan    chan struct{}
+	filePath string
+	mu       sync.Mutex
 }
 
 func newSyncSaveRepository(repo repository.MetricRepository, filePath string) *syncSaveRepository {
-	storage := &syncSaveRepository{
+	return &syncSaveRepository{
 		MetricRepository: repo,
 		filePath:         filePath,
-		buffer:           make(map[string]interface{}),
-		maxBuffer:        10,
-		stopChan:         make(chan struct{}),
-	}
-
-	// Запускаем фоновую горутину для периодического сброса
-	storage.flushTicker = time.NewTicker(5 * time.Second)
-	go storage.backgroundFlush()
-
-	return storage
-}
-
-func (s *syncSaveRepository) backgroundFlush() {
-	for {
-		select {
-		case <-s.flushTicker.C:
-			s.flush()
-		case <-s.stopChan:
-			s.flushTicker.Stop()
-			return
-		}
-	}
-}
-
-func (s *syncSaveRepository) flush() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.bufferSize == 0 {
-		return
-	}
-
-	if err := s.MetricRepository.SaveToFile(context.Background(), s.filePath); err != nil {
-		log.Printf("Failed to save metrics synchronously: %v\n", err)
-	}
-
-	// Очищаем буфер
-	s.buffer = make(map[string]interface{})
-	s.bufferSize = 0
-}
-
-func (s *syncSaveRepository) UpdateGauge(ctx context.Context, name string, value float64) error {
-	err := s.MetricRepository.UpdateGauge(ctx, name, value)
-	s.bufferUpdate(name, value)
-	return err
-}
-
-func (s *syncSaveRepository) UpdateCounter(ctx context.Context, name string, value int64) error {
-	err := s.MetricRepository.UpdateCounter(ctx, name, value)
-	s.bufferUpdate(name, value)
-	return err
-}
-
-func (s *syncSaveRepository) bufferUpdate(name string, value interface{}) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.buffer[name] = value
-	s.bufferSize++
-
-	// Если буфер заполнен, сбрасываем на диск
-	if s.bufferSize >= s.maxBuffer {
-		go s.flush()
 	}
 }
 
 func (s *syncSaveRepository) Close() {
-	close(s.stopChan)
-	s.flush()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.SaveToFile(context.Background(), s.filePath); err != nil {
+		log.Printf("Failed to save metrics on close: %v\n", err)
+	}
 }

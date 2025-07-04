@@ -7,7 +7,9 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// LoggerMiddleware создает middleware для логирования запросов и ответов.
+// LoggerMiddleware creates a middleware that logs HTTP requests and responses.
+// It logs method, URI, status code, response size and duration for each request.
+// Uses zerolog for structured logging.
 func LoggerMiddleware(logger zerolog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

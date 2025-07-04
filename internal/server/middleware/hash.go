@@ -11,7 +11,9 @@ import (
 	"strings"
 )
 
-// HashMiddleware создает middleware для проверки подписи запросов и подписи ответов
+// HashMiddleware creates a middleware that verifies HMAC-SHA256 signatures.
+// It checks the HashSHA256 header for incoming requests and adds it to responses.
+// If key is empty, signature verification is skipped.
 func HashMiddleware(key string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

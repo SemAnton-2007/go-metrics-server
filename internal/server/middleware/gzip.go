@@ -5,8 +5,18 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 )
 
+var gzipWriterPool = sync.Pool{
+	New: func() interface{} {
+		return gzip.NewWriter(nil)
+	},
+}
+
+// GzipMiddleware creates a middleware that handles gzip compression.
+// It decompresses incoming requests with Content-Encoding: gzip header
+// and compresses responses when client accepts gzip encoding.
 func GzipMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Распаковка входящего запроса
@@ -32,9 +42,13 @@ func GzipMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Transfer-Encoding", "chunked")
 		w.Header().Del("Content-Length")
 
-		// Создаем gzip writer
-		gz := gzip.NewWriter(w)
-		defer gz.Close()
+		// Получаем gzip writer из пула
+		gz := gzipWriterPool.Get().(*gzip.Writer)
+		gz.Reset(w)
+		defer func() {
+			gz.Close()
+			gzipWriterPool.Put(gz)
+		}()
 
 		next.ServeHTTP(&gzipResponseWriter{ResponseWriter: w, Writer: gz}, r)
 	})
