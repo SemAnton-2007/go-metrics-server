@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -238,4 +239,40 @@ func TestGetMetricValueJSONHandler(t *testing.T) {
 		handler.GetMetricValueJSON(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
 	})
+}
+
+func TestBatchUpdate(t *testing.T) {
+	repo := repository.NewMemoryRepository()
+	handler := NewMetricHandler(service.NewMetricService(repo))
+
+	t.Run("successful batch update", func(t *testing.T) {
+		metrics := []models.Metrics{
+			{ID: "gauge1", MType: "gauge", Value: ptrFloat64(1.23)},
+			{ID: "counter1", MType: "counter", Delta: ptrInt64(10)},
+		}
+		body, _ := json.Marshal(metrics)
+
+		req := httptest.NewRequest("POST", "/updates/", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.BatchUpdate(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("invalid content type", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/updates/", nil)
+		w := httptest.NewRecorder()
+
+		handler.BatchUpdate(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func ptrFloat64(f float64) *float64 {
+	return &f
+}
+
+func ptrInt64(i int64) *int64 {
+	return &i
 }

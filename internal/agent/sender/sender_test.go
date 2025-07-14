@@ -71,3 +71,26 @@ func TestHashHeader(t *testing.T) {
 		assert.NotEmpty(t, receivedHash)
 	})
 }
+
+func TestSendMetricsBatch(t *testing.T) {
+	t.Run("successful batch send", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "/updates/", r.URL.Path)
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer ts.Close()
+
+		s := New(ts.URL, "")
+		err := s.SendMetricsBatch(map[string]interface{}{
+			"gauge1":   1.23,
+			"counter1": int64(10),
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("empty batch", func(t *testing.T) {
+		s := New("http://localhost:8080", "")
+		err := s.SendMetricsBatch(map[string]interface{}{})
+		assert.NoError(t, err)
+	})
+}
