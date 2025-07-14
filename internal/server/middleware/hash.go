@@ -42,7 +42,12 @@ func HashMiddleware(key string) func(http.Handler) http.Handler {
 						http.Error(w, "Failed to decompress request body", http.StatusBadRequest)
 						return
 					}
-					defer gz.Close()
+					defer func() {
+						if err := gz.Close(); err != nil {
+							http.Error(w, "Failed to close gzip reader", http.StatusInternalServerError)
+							return
+						}
+					}()
 					body, err = io.ReadAll(gz)
 					if err != nil {
 						http.Error(w, "Failed to read decompressed body", http.StatusBadRequest)
@@ -61,7 +66,10 @@ func HashMiddleware(key string) func(http.Handler) http.Handler {
 
 				// Проверяем подпись
 				h := hmac.New(sha256.New, []byte(key))
-				h.Write(body)
+				if _, err := h.Write(body); err != nil {
+					http.Error(w, "Failed to calculate hash", http.StatusInternalServerError)
+					return
+				}
 				expectedHash := hex.EncodeToString(h.Sum(nil))
 
 				if hash != expectedHash {
@@ -90,9 +98,15 @@ func (w *hashResponseWriter) Write(b []byte) (int, error) {
 	// Добавляем подпись, если ключ установлен
 	if len(w.key) > 0 {
 		h := hmac.New(sha256.New, w.key)
-		h.Write(b)
+		if _, err := h.Write(b); err != nil {
+			return 0, err
+		}
 		hash := hex.EncodeToString(h.Sum(nil))
 		w.Header().Set("HashSHA256", hash)
 	}
-	return w.ResponseWriter.Write(b)
+	n, err := w.ResponseWriter.Write(b)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
 }

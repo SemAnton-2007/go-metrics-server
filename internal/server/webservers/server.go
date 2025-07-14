@@ -67,7 +67,12 @@ func gzipMiddleware(next http.Handler) http.Handler {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			defer gz.Close()
+			defer func() {
+				if err := gz.Close(); err != nil {
+					http.Error(w, "Failed to close gzip reader", http.StatusInternalServerError)
+					return
+				}
+			}()
 			r.Body = gz
 		}
 
@@ -79,7 +84,10 @@ func gzipMiddleware(next http.Handler) http.Handler {
 			gz := gzipWriterPool.Get().(*gzip.Writer)
 			gz.Reset(w)
 			defer func() {
-				gz.Close()
+				if err := gz.Close(); err != nil {
+					http.Error(w, "Failed to close gzip writer", http.StatusInternalServerError)
+					return
+				}
 				gzipWriterPool.Put(gz)
 			}()
 
@@ -121,5 +129,9 @@ type gzipResponseWriter struct {
 }
 
 func (w gzipResponseWriter) Write(b []byte) (int, error) {
-	return w.Writer.Write(b)
+	n, err := w.Writer.Write(b)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
 }

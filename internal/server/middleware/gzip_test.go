@@ -15,7 +15,9 @@ func TestGzipMiddleware(t *testing.T) {
 	t.Run("should compress JSON response when client accepts gzip", func(t *testing.T) {
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{"status":"ok"}`))
+			if _, err := w.Write([]byte(`{"status":"ok"}`)); err != nil {
+				t.Errorf("Failed to write response: %v", err)
+			}
 		})
 
 		req := httptest.NewRequest("GET", "/", nil)
@@ -32,11 +34,18 @@ func TestGzipMiddleware(t *testing.T) {
 	t.Run("should decompress gzipped request", func(t *testing.T) {
 		var buf bytes.Buffer
 		gz := gzip.NewWriter(&buf)
-		gz.Write([]byte("test data"))
-		gz.Close()
+		if _, err := gz.Write([]byte("test data")); err != nil {
+			t.Fatalf("Failed to write gzipped data: %v", err)
+		}
+		if err := gz.Close(); err != nil {
+			t.Fatalf("Failed to close gzip writer: %v", err)
+		}
 
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			data, _ := io.ReadAll(r.Body)
+			data, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("Failed to read request body: %v", err)
+			}
 			if string(data) != "test data" {
 				t.Error("Request body was not decompressed")
 			}
@@ -51,7 +60,9 @@ func TestGzipMiddleware(t *testing.T) {
 
 	t.Run("should not compress when client doesn't accept gzip", func(t *testing.T) {
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte("raw data"))
+			if _, err := w.Write([]byte("raw data")); err != nil {
+				t.Errorf("Failed to write response: %v", err)
+			}
 		})
 
 		req := httptest.NewRequest("GET", "/", nil) // No Accept-Encoding header

@@ -23,7 +23,9 @@ func main() {
 func RunServer(cfg *config.Config) {
 	go func() {
 		log.Println("Debug server running on :6060")
-		log.Fatal(http.ListenAndServe(":6060", nil))
+		if err := http.ListenAndServe(":6060", nil); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Debug server error: %v\n", err)
+		}
 	}()
 
 	var db *database.DB
@@ -36,7 +38,11 @@ func RunServer(cfg *config.Config) {
 		if err != nil {
 			log.Fatalf("Failed to connect to database: %v\n", err)
 		}
-		defer db.Close()
+		defer func() {
+			if err := db.Close(); err != nil {
+				log.Printf("Failed to close database connection: %v\n", err)
+			}
+		}()
 		log.Println("Connected to PostgreSQL database")
 
 		pgRepo, err := repository.NewPostgresRepository(db.DB)
@@ -69,7 +75,11 @@ func RunServer(cfg *config.Config) {
 			defer saveTicker.Stop()
 		} else if cfg.FileStorage != "" {
 			repo = newSyncSaveRepository(memRepo, cfg.FileStorage)
-			defer repo.(*syncSaveRepository).Close()
+			defer func() {
+				if err := repo.(*syncSaveRepository).Close(); err != nil {
+					log.Printf("Failed to close sync repository: %v\n", err)
+				}
+			}()
 		} else {
 			repo = memRepo
 		}
@@ -81,14 +91,19 @@ func RunServer(cfg *config.Config) {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
+	serverErr := make(chan error, 1)
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server error: %v\n", err)
+			serverErr <- err
 		}
 	}()
 
-	<-stop
-	log.Println("Server is shutting down...")
+	select {
+	case <-stop:
+		log.Println("Server is shutting down...")
+	case err := <-serverErr:
+		log.Fatalf("Server error: %v\n", err)
+	}
 
 	if cfg.DatabaseDSN == "" && cfg.FileStorage != "" {
 		if err := repo.SaveToFile(context.Background(), cfg.FileStorage); err != nil {
@@ -118,11 +133,13 @@ func newSyncSaveRepository(repo repository.MetricRepository, filePath string) *s
 	}
 }
 
-func (s *syncSaveRepository) Close() {
+func (s *syncSaveRepository) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if err := s.SaveToFile(context.Background(), s.filePath); err != nil {
 		log.Printf("Failed to save metrics on close: %v\n", err)
+		return err
 	}
+	return nil
 }

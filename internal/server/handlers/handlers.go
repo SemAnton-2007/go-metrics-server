@@ -66,7 +66,10 @@ func (h *MetricHandler) UpdateMetric(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("OK"))
+	if _, err := w.Write([]byte("OK")); err != nil {
+		fmt.Printf("Write response error: %v", err)
+		return
+	}
 }
 
 func (h *MetricHandler) GetMetricValue(w http.ResponseWriter, r *http.Request) {
@@ -93,7 +96,10 @@ func (h *MetricHandler) GetMetricValue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(fmt.Sprintf("%v", value)))
+	if _, err := w.Write([]byte(fmt.Sprintf("%v", value))); err != nil {
+		fmt.Printf("Write response error: %v", err)
+		return
+	}
 }
 
 func (h *MetricHandler) GetAllMetrics(w http.ResponseWriter, r *http.Request) {
@@ -113,7 +119,10 @@ func (h *MetricHandler) GetAllMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 	buf.WriteString("</ul>")
 
-	w.Write(buf.Bytes())
+	if _, err := w.Write(buf.Bytes()); err != nil {
+		fmt.Printf("Write response error: %v", err)
+		return
+	}
 }
 
 func (h *MetricHandler) UpdateMetricJSON(w http.ResponseWriter, r *http.Request) {
@@ -213,7 +222,9 @@ func (h *MetricHandler) GetMetricValueJSON(w http.ResponseWriter, r *http.Reques
 	} else {
 		w.WriteHeader(http.StatusOK)
 	}
-	json.NewEncoder(w).Encode(metric)
+	if err := json.NewEncoder(w).Encode(metric); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
 }
 
 func (h *MetricHandler) BatchUpdate(w http.ResponseWriter, r *http.Request) {
@@ -247,6 +258,8 @@ func (h *MetricHandler) BatchUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(metrics)
+	if err := json.NewEncoder(w).Encode(metrics); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		return
+	}
 }

@@ -111,7 +111,10 @@ func TestGetMetricValueHandler(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 
 	// Тест 2: Успешное получение метрики gauge
-	repo.UpdateGauge(context.Background(), "test", 123.45)
+	err := repo.UpdateGauge(context.Background(), "test", 123.45)
+	if err != nil {
+		t.Fatalf("Failed to update gauge: %v", err)
+	}
 	req = httptest.NewRequest(http.MethodGet, "/value/gauge/test", nil)
 	rctx = chi.NewRouteContext()
 	rctx.URLParams.Add("type", "gauge")
@@ -124,7 +127,10 @@ func TestGetMetricValueHandler(t *testing.T) {
 	assert.Equal(t, "123.45", w.Body.String())
 
 	// Тест 3: Успешное получение метрики counter
-	repo.UpdateCounter(context.Background(), "test", 10)
+	err = repo.UpdateCounter(context.Background(), "test", 10)
+	if err != nil {
+		t.Fatalf("Failed to update counter: %v", err)
+	}
 	req = httptest.NewRequest(http.MethodGet, "/value/counter/test", nil)
 	rctx = chi.NewRouteContext()
 	rctx.URLParams.Add("type", "counter")
@@ -153,8 +159,14 @@ func TestGetAllMetricsHandler(t *testing.T) {
 	handler := NewMetricHandler(service.NewMetricService(repo))
 
 	// Тест 1: Успешное получение всех метрик
-	repo.UpdateGauge(context.Background(), "test_gauge", 123.45)
-	repo.UpdateCounter(context.Background(), "test_counter", 10)
+	err := repo.UpdateGauge(context.Background(), "test_gauge", 123.45)
+	if err != nil {
+		t.Fatalf("Failed to update gauge: %v", err)
+	}
+	err = repo.UpdateCounter(context.Background(), "test_counter", 10)
+	if err != nil {
+		t.Fatalf("Failed to update counter: %v", err)
+	}
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
 	handler.GetAllMetrics(w, req)
@@ -177,7 +189,9 @@ func TestUpdateMetricJSONHandler(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 
 		var resp models.Metrics
-		json.Unmarshal(w.Body.Bytes(), &resp)
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("Failed to unmarshal response: %v", err)
+		}
 		assert.Equal(t, 1.23, *resp.Value)
 	})
 
@@ -194,7 +208,10 @@ func TestUpdateMetricJSONHandler(t *testing.T) {
 func TestGetMetricValueJSONHandler(t *testing.T) {
 	repo := repository.NewMemoryRepository()
 	handler := NewMetricHandler(service.NewMetricService(repo))
-	repo.UpdateGauge(context.Background(), "test", 1.23)
+	err := repo.UpdateGauge(context.Background(), "test", 1.23)
+	if err != nil {
+		t.Fatalf("Failed to update gauge: %v", err)
+	}
 
 	t.Run("success get gauge", func(t *testing.T) {
 		body := `{"id":"test","type":"gauge"}`
@@ -206,7 +223,9 @@ func TestGetMetricValueJSONHandler(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 
 		var resp models.Metrics
-		json.Unmarshal(w.Body.Bytes(), &resp)
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("Failed to unmarshal response: %v", err)
+		}
 		assert.Equal(t, 1.23, *resp.Value)
 	})
 
