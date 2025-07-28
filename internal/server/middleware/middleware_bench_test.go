@@ -8,7 +8,10 @@ import (
 
 func BenchmarkGzipMiddleware(b *testing.B) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("test response"))
+		_, err := w.Write([]byte("test response"))
+		if err != nil {
+			b.Errorf("Failed to write response in handler: %v", err)
+		}
 	})
 	middleware := GzipMiddleware(handler)
 
@@ -19,12 +22,18 @@ func BenchmarkGzipMiddleware(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		w := httptest.NewRecorder()
 		middleware.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			b.Errorf("Unexpected status code: %d", w.Code)
+		}
 	}
 }
 
 func BenchmarkHashMiddleware(b *testing.B) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("test response"))
+		_, err := w.Write([]byte("test response"))
+		if err != nil {
+			b.Errorf("Failed to write response in handler: %v", err)
+		}
 	})
 	middleware := HashMiddleware("test-key")(handler)
 
@@ -35,5 +44,8 @@ func BenchmarkHashMiddleware(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		w := httptest.NewRecorder()
 		middleware.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			b.Errorf("Unexpected status code: %d", w.Code)
+		}
 	}
 }

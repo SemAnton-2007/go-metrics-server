@@ -169,7 +169,11 @@ func (r *PostgresRepository) GetAllMetrics(ctx context.Context) (map[string]inte
 	if err != nil {
 		errs = append(errs, fmt.Errorf("failed to get gauges: %w", err))
 	} else {
-		defer rows.Close()
+		defer func() {
+			if err := rows.Close(); err != nil {
+				fmt.Printf("Failed to close gauge rows: %v", err)
+			}
+		}()
 		for rows.Next() {
 			var name string
 			var value float64
@@ -189,7 +193,11 @@ func (r *PostgresRepository) GetAllMetrics(ctx context.Context) (map[string]inte
 	if err != nil {
 		errs = append(errs, fmt.Errorf("failed to get counters: %w", err))
 	} else {
-		defer rows.Close()
+		defer func() {
+			if err := rows.Close(); err != nil {
+				fmt.Printf("Failed to close counter rows: %v", err)
+			}
+		}()
 		for rows.Next() {
 			var name string
 			var value int64
@@ -215,7 +223,11 @@ func (r *PostgresRepository) UpdateMetrics(ctx context.Context, metrics []models
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		if txErr := tx.Rollback(); txErr != nil && !errors.Is(txErr, sql.ErrTxDone) {
+			fmt.Printf("Failed to rollback transaction: %v", txErr)
+		}
+	}()
 
 	for _, metric := range metrics {
 		switch metric.MType {
@@ -357,7 +369,11 @@ func (r *MemoryRepository) SaveToFile(ctx context.Context, filename string) erro
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			fmt.Printf("Failed to close file %s: %v", filename, closeErr)
+		}
+	}()
 
 	encoder := json.NewEncoder(file)
 	encoder.SetIndent("", "  ")
@@ -379,7 +395,11 @@ func (r *MemoryRepository) LoadFromFile(ctx context.Context, filename string) er
 		}
 		return err
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			fmt.Printf("Failed to close file %s: %v", filename, closeErr)
+		}
+	}()
 
 	var data struct {
 		Gauges   map[string]float64 `json:"gauges"`

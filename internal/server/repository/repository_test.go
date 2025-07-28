@@ -35,7 +35,11 @@ func TestMemoryRepository(t *testing.T) {
 
 	// Тест 4: Сохранение и загрузка метрик
 	tmpFile := filepath.Join(os.TempDir(), "metrics_test.json")
-	defer os.Remove(tmpFile)
+	defer func() {
+		if err := os.Remove(tmpFile); err != nil && !os.IsNotExist(err) {
+			t.Errorf("Failed to remove temp file: %v", err)
+		}
+	}()
 
 	err = repo.UpdateGauge(ctx, "cpu", 75.5)
 	assert.NoError(t, err)

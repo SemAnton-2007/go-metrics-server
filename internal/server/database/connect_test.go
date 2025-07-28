@@ -13,32 +13,40 @@ func TestDBConnection(t *testing.T) {
 	dsn := "postgres://praktikum:praktikum@localhost:5432/praktikum?sslmode=disable"
 
 	db, err := New(dsn)
-	if err != nil {
-		t.Fatalf("Failed to connect: %v", err)
-	}
-	defer db.Close()
+	require.NoError(t, err, "Failed to connect to database")
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("Failed to close database connection: %v", err)
+		}
+	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	err = db.Ping(ctx)
-	if err != nil {
-		t.Errorf("Ping failed: %v", err)
-	}
+	assert.NoError(t, err, "Database ping failed")
 }
 
 func TestDB_Ping(t *testing.T) {
 	dsn := "postgres://praktikum:praktikum@localhost:5432/praktikum?sslmode=disable"
 	db, err := New(dsn)
-	require.NoError(t, err)
-	defer db.Close()
+	require.NoError(t, err, "Failed to connect to database")
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("Failed to close database connection: %v", err)
+		}
+	}()
 
-	ctx := context.Background()
-	err = db.Ping(ctx)
-	assert.NoError(t, err)
+	t.Run("successful ping", func(t *testing.T) {
+		ctx := context.Background()
+		err = db.Ping(ctx)
+		assert.NoError(t, err, "Ping should succeed with valid context")
+	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	err = db.Ping(ctx)
-	assert.Error(t, err)
+	t.Run("ping with canceled context", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		err = db.Ping(ctx)
+		assert.Error(t, err, "Ping should fail with canceled context")
+	})
 }

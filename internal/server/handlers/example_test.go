@@ -45,7 +45,11 @@ func ExampleMetricHandler_UpdateMetricJSON() {
 		MType: "gauge",
 		Value: ptrFloat64(75.3),
 	}
-	body, _ := json.Marshal(metric)
+	body, err := json.Marshal(metric)
+	if err != nil {
+		fmt.Printf("JSON marshal error: %v\n", err)
+		return
+	}
 
 	req := httptest.NewRequest("POST", "/update/", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -55,7 +59,10 @@ func ExampleMetricHandler_UpdateMetricJSON() {
 
 	fmt.Printf("Status: %d\n", w.Code)
 	var resp models.Metrics
-	json.NewDecoder(w.Body).Decode(&resp)
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		fmt.Printf("JSON decode error: %v\n", err)
+		return
+	}
 	fmt.Printf("Updated value: %.1f\n", *resp.Value)
 
 	// Output:
@@ -68,8 +75,14 @@ func ExampleMetricHandler_GetAllMetrics() {
 	handler := handlers.NewMetricHandler(service.NewMetricService(repo))
 
 	// Add some test data
-	repo.UpdateGauge(context.Background(), "temperature", 23.5)
-	repo.UpdateCounter(context.Background(), "requests", 42)
+	if err := repo.UpdateGauge(context.Background(), "temperature", 23.5); err != nil {
+		fmt.Printf("UpdateGauge error: %v\n", err)
+		return
+	}
+	if err := repo.UpdateCounter(context.Background(), "requests", 42); err != nil {
+		fmt.Printf("UpdateCounter error: %v\n", err)
+		return
+	}
 
 	req := httptest.NewRequest("GET", "/", nil)
 	w := httptest.NewRecorder()

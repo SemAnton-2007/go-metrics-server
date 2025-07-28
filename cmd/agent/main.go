@@ -4,12 +4,15 @@ import (
 	"go-metrics-server/internal/agent/config"
 	"go-metrics-server/internal/agent/metrics"
 	"go-metrics-server/internal/agent/sender"
+	"go-metrics-server/internal/buildinfo"
 	"log"
 	"sync"
 	"time"
 )
 
 func main() {
+	buildinfo.Print()
+
 	RunAgent(config.NewConfig())
 }
 

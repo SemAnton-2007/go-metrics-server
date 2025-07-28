@@ -19,23 +19,36 @@ func TestNewServer(t *testing.T) {
 
 	// Тест 1: Проверка маршрута /update/
 	ts := httptest.NewServer(srv.Handler)
-	defer ts.Close()
+	defer func() {
+		ts.Close()
+	}()
 
-	resp, err := http.Post(ts.URL+"/update/gauge/test/123.45", "text/plain", nil)
-	assert.NoError(t, err)
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	resp.Body.Close()
+	t.Run("update gauge metric", func(t *testing.T) {
+		resp, err := http.Post(ts.URL+"/update/gauge/test/123.45", "text/plain", nil)
+		assert.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("Failed to close response body: %v", err)
+		}
+	})
 
-	resp, err = http.Post(ts.URL+"/update/counter/test/10", "text/plain", nil)
-	assert.NoError(t, err)
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	resp.Body.Close()
+	t.Run("update counter metric", func(t *testing.T) {
+		resp, err := http.Post(ts.URL+"/update/counter/test/10", "text/plain", nil)
+		assert.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("Failed to close response body: %v", err)
+		}
+	})
 
-	// Тест 3: Проверка маршрута /ping (должен отсутствовать при nil DB)
-	resp, err = http.Get(ts.URL + "/ping")
-	assert.NoError(t, err)
-	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
-	resp.Body.Close()
+	t.Run("ping endpoint with nil DB", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/ping")
+		assert.NoError(t, err)
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("Failed to close response body: %v", err)
+		}
+	})
 }
 
 func TestPingHandler(t *testing.T) {
@@ -45,6 +58,7 @@ func TestPingHandler(t *testing.T) {
 	srv := NewServer(cfg, repo, mockDB)
 
 	ts := httptest.NewServer(srv.Handler)
-	defer ts.Close()
-
+	defer func() {
+		ts.Close()
+	}()
 }

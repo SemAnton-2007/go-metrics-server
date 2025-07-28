@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -111,7 +112,10 @@ func TestGetMetricValueHandler(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 
 	// Тест 2: Успешное получение метрики gauge
-	repo.UpdateGauge(context.Background(), "test", 123.45)
+	err := repo.UpdateGauge(context.Background(), "test", 123.45)
+	if err != nil {
+		t.Fatalf("Failed to update gauge: %v", err)
+	}
 	req = httptest.NewRequest(http.MethodGet, "/value/gauge/test", nil)
 	rctx = chi.NewRouteContext()
 	rctx.URLParams.Add("type", "gauge")
@@ -124,7 +128,10 @@ func TestGetMetricValueHandler(t *testing.T) {
 	assert.Equal(t, "123.45", w.Body.String())
 
 	// Тест 3: Успешное получение метрики counter
-	repo.UpdateCounter(context.Background(), "test", 10)
+	err = repo.UpdateCounter(context.Background(), "test", 10)
+	if err != nil {
+		t.Fatalf("Failed to update counter: %v", err)
+	}
 	req = httptest.NewRequest(http.MethodGet, "/value/counter/test", nil)
 	rctx = chi.NewRouteContext()
 	rctx.URLParams.Add("type", "counter")
@@ -153,8 +160,14 @@ func TestGetAllMetricsHandler(t *testing.T) {
 	handler := NewMetricHandler(service.NewMetricService(repo))
 
 	// Тест 1: Успешное получение всех метрик
-	repo.UpdateGauge(context.Background(), "test_gauge", 123.45)
-	repo.UpdateCounter(context.Background(), "test_counter", 10)
+	err := repo.UpdateGauge(context.Background(), "test_gauge", 123.45)
+	if err != nil {
+		t.Fatalf("Failed to update gauge: %v", err)
+	}
+	err = repo.UpdateCounter(context.Background(), "test_counter", 10)
+	if err != nil {
+		t.Fatalf("Failed to update counter: %v", err)
+	}
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
 	handler.GetAllMetrics(w, req)
@@ -177,7 +190,9 @@ func TestUpdateMetricJSONHandler(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 
 		var resp models.Metrics
-		json.Unmarshal(w.Body.Bytes(), &resp)
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("Failed to unmarshal response: %v", err)
+		}
 		assert.Equal(t, 1.23, *resp.Value)
 	})
 
@@ -194,7 +209,10 @@ func TestUpdateMetricJSONHandler(t *testing.T) {
 func TestGetMetricValueJSONHandler(t *testing.T) {
 	repo := repository.NewMemoryRepository()
 	handler := NewMetricHandler(service.NewMetricService(repo))
-	repo.UpdateGauge(context.Background(), "test", 1.23)
+	err := repo.UpdateGauge(context.Background(), "test", 1.23)
+	if err != nil {
+		t.Fatalf("Failed to update gauge: %v", err)
+	}
 
 	t.Run("success get gauge", func(t *testing.T) {
 		body := `{"id":"test","type":"gauge"}`
@@ -206,7 +224,9 @@ func TestGetMetricValueJSONHandler(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 
 		var resp models.Metrics
-		json.Unmarshal(w.Body.Bytes(), &resp)
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("Failed to unmarshal response: %v", err)
+		}
 		assert.Equal(t, 1.23, *resp.Value)
 	})
 
@@ -219,4 +239,40 @@ func TestGetMetricValueJSONHandler(t *testing.T) {
 		handler.GetMetricValueJSON(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
 	})
+}
+
+func TestBatchUpdate(t *testing.T) {
+	repo := repository.NewMemoryRepository()
+	handler := NewMetricHandler(service.NewMetricService(repo))
+
+	t.Run("successful batch update", func(t *testing.T) {
+		metrics := []models.Metrics{
+			{ID: "gauge1", MType: "gauge", Value: ptrFloat64(1.23)},
+			{ID: "counter1", MType: "counter", Delta: ptrInt64(10)},
+		}
+		body, _ := json.Marshal(metrics)
+
+		req := httptest.NewRequest("POST", "/updates/", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.BatchUpdate(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("invalid content type", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/updates/", nil)
+		w := httptest.NewRecorder()
+
+		handler.BatchUpdate(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func ptrFloat64(f float64) *float64 {
+	return &f
+}
+
+func ptrInt64(i int64) *int64 {
+	return &i
 }

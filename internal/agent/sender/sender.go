@@ -171,7 +171,9 @@ func (s *Sender) sendRequest(endpoint string, metrics []models.Metrics) error {
 
 	if s.Key != "" {
 		h := hmac.New(sha256.New, []byte(s.Key))
-		h.Write(jsonData)
+		if _, err := h.Write(jsonData); err != nil {
+			return fmt.Errorf("failed to calculate hash: %w", err)
+		}
 		hash := hex.EncodeToString(h.Sum(nil))
 		req.Header.Set("HashSHA256", hash)
 	}
@@ -180,7 +182,11 @@ func (s *Sender) sendRequest(endpoint string, metrics []models.Metrics) error {
 	if err != nil {
 		return fmt.Errorf("failed to send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			fmt.Printf("failed to close response body: %v\n", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("unexpected status: %d", resp.StatusCode)

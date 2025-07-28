@@ -8,6 +8,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestLoggerMiddleware проверяет, что middleware корректно логирует запросы и ответы.
@@ -19,7 +20,8 @@ func TestLoggerMiddleware(t *testing.T) {
 	// Создаем тестовый обработчик, который возвращает статус 200 и тело "OK"
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		_, err := w.Write([]byte("OK"))
+		require.NoError(t, err, "Failed to write response")
 	})
 
 	// Оборачиваем обработчик в middleware
@@ -55,7 +57,8 @@ func TestLoggerMiddlewareWithError(t *testing.T) {
 	// Создаем тестовый обработчик, который возвращает статус 404
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("Not Found"))
+		_, err := w.Write([]byte("Not Found"))
+		require.NoError(t, err, "Failed to write response")
 	})
 
 	// Оборачиваем обработчик в middleware
@@ -93,6 +96,7 @@ func TestLoggingResponseWriter(t *testing.T) {
 	// Устанавливаем статус и пишем тело ответа
 	lw.WriteHeader(http.StatusOK)
 	size, err := lw.Write([]byte("OK"))
+	require.NoError(t, err, "Failed to write response")
 
 	// Проверяем, что размер и ошибка корректны
 	assert.Equal(t, 2, size)
