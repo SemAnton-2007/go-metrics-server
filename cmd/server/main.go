@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"go-metrics-server/internal/buildinfo"
 	"go-metrics-server/internal/server/config"
 	"go-metrics-server/internal/server/database"
 	"go-metrics-server/internal/server/repository"
@@ -16,17 +17,8 @@ import (
 	"time"
 )
 
-var (
-	buildVersion string = "N/A"
-	buildDate    string = "N/A"
-	buildCommit  string = "N/A"
-)
-
 func main() {
-	log.Printf("Build version: %s\n", buildVersion)
-	log.Printf("Build date: %s\n", buildDate)
-	log.Printf("Build commit: %s\n", buildCommit)
-
+	buildinfo.Print()
 	RunServer(config.NewConfig())
 }
 
@@ -84,10 +76,12 @@ func RunServer(cfg *config.Config) {
 			}()
 			defer saveTicker.Stop()
 		} else if cfg.FileStorage != "" {
-			repo = newSyncSaveRepository(memRepo, cfg.FileStorage)
+			repo = newSyncSaveRepository(memRepo, cfg.FileStorage, log.Default())
 			defer func() {
-				if err := repo.(*syncSaveRepository).Close(); err != nil {
-					log.Printf("Failed to close sync repository: %v\n", err)
+				if syncRepo, ok := repo.(*syncSaveRepository); ok {
+					if err := syncRepo.Close(); err != nil {
+						log.Printf("Failed to close sync repository: %v\n", err)
+					}
 				}
 			}()
 		} else {
@@ -134,12 +128,14 @@ type syncSaveRepository struct {
 	repository.MetricRepository
 	filePath string
 	mu       sync.Mutex
+	logger   *log.Logger
 }
 
-func newSyncSaveRepository(repo repository.MetricRepository, filePath string) *syncSaveRepository {
+func newSyncSaveRepository(repo repository.MetricRepository, filePath string, logger *log.Logger) *syncSaveRepository {
 	return &syncSaveRepository{
 		MetricRepository: repo,
 		filePath:         filePath,
+		logger:           logger,
 	}
 }
 
@@ -148,7 +144,7 @@ func (s *syncSaveRepository) Close() error {
 	defer s.mu.Unlock()
 
 	if err := s.SaveToFile(context.Background(), s.filePath); err != nil {
-		log.Printf("Failed to save metrics on close: %v\n", err)
+		s.logger.Printf("Failed to save metrics on close: %v\n", err)
 		return err
 	}
 	return nil

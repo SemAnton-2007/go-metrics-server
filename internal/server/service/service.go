@@ -5,8 +5,10 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"go-metrics-server/internal/models"
 	"go-metrics-server/internal/server/repository"
+	"strconv"
 )
 
 // MetricService provides business logic operations for metrics.
@@ -76,4 +78,20 @@ func (s *MetricService) SaveToFile(ctx context.Context, filename string) error {
 // Returns nil if successful, or error if file operations failed.
 func (s *MetricService) LoadFromFile(ctx context.Context, filename string) error {
 	return s.repo.LoadFromFile(ctx, filename)
+}
+
+func (s *MetricService) UpdateGaugeFromString(ctx context.Context, name, valueStr string) error {
+	value, err := strconv.ParseFloat(valueStr, 64)
+	if err != nil {
+		return fmt.Errorf("invalid gauge value: %w", err)
+	}
+	return s.UpdateGauge(ctx, name, value)
+}
+
+func (s *MetricService) UpdateCounterFromString(ctx context.Context, name, valueStr string) error {
+	value, err := strconv.ParseInt(valueStr, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid counter value: %w", err)
+	}
+	return s.UpdateCounter(ctx, name, value)
 }

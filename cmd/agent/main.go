@@ -4,21 +4,14 @@ import (
 	"go-metrics-server/internal/agent/config"
 	"go-metrics-server/internal/agent/metrics"
 	"go-metrics-server/internal/agent/sender"
+	"go-metrics-server/internal/buildinfo"
 	"log"
 	"sync"
 	"time"
 )
 
-var (
-	buildVersion string = "N/A"
-	buildDate    string = "N/A"
-	buildCommit  string = "N/A"
-)
-
 func main() {
-	log.Printf("Build version: %s\n", buildVersion)
-	log.Printf("Build date: %s\n", buildDate)
-	log.Printf("Build commit: %s\n", buildCommit)
+	buildinfo.Print()
 
 	RunAgent(config.NewConfig())
 }

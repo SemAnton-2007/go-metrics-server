@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go-metrics-server/internal/models"
 	"go-metrics-server/internal/server/service"
@@ -39,29 +40,25 @@ func (h *MetricHandler) UpdateMetric(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+	var err error
+
 	switch metricType {
 	case "gauge":
-		value, err := strconv.ParseFloat(metricValue, 64)
-		if err != nil {
-			http.Error(w, "Invalid gauge value", http.StatusBadRequest)
-			return
-		}
-		if err := h.service.UpdateGauge(ctx, metricName, value); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
+		err = h.service.UpdateGaugeFromString(ctx, metricName, metricValue)
 	case "counter":
-		value, err := strconv.ParseInt(metricValue, 10, 64)
-		if err != nil {
-			http.Error(w, "Invalid counter value", http.StatusBadRequest)
-			return
-		}
-		if err := h.service.UpdateCounter(ctx, metricName, value); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
+		err = h.service.UpdateCounterFromString(ctx, metricName, metricValue)
 	default:
 		http.Error(w, "Invalid metric type", http.StatusBadRequest)
+		return
+	}
+
+	if err != nil {
+		switch {
+		case errors.Is(err, strconv.ErrSyntax):
+			http.Error(w, "Invalid metric value", http.StatusBadRequest)
+		default:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
 		return
 	}
 
