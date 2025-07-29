@@ -129,7 +129,7 @@ func (cfg *Config) setDefaults() {
 	if cfg.FileStorage == "" {
 		cfg.FileStorage = defaultFileStorage
 	}
-	if !cfg.Restore && cfg.Restore != defaultRestore {
+	if !cfg.Restore {
 		cfg.Restore = defaultRestore
 	}
 }
