@@ -40,6 +40,7 @@ type Sender struct {
 	Client    *http.Client
 	Key       string
 	PublicKey *rsa.PublicKey
+	Config    *config.Config // Добавляем конфиг
 }
 
 func New(serverURL, key string, cfg *config.Config) *Sender {
@@ -48,8 +49,8 @@ func New(serverURL, key string, cfg *config.Config) *Sender {
 	}
 
 	var publicKey *rsa.PublicKey
+	var err error
 	if cfg.CryptoKey != "" {
-		var err error
 		publicKey, err = crypto.LoadPublicKey(cfg.CryptoKey)
 		if err != nil {
 			logrus.Errorf("Failed to load public key: %v", err)
@@ -61,6 +62,7 @@ func New(serverURL, key string, cfg *config.Config) *Sender {
 		Client:    &http.Client{Timeout: 10 * time.Second},
 		Key:       key,
 		PublicKey: publicKey,
+		Config:    cfg,
 	}
 }
 
