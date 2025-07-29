@@ -18,7 +18,7 @@ func main() {
 
 func RunAgent(cfg *config.Config) {
 	metricsCollector := metrics.NewMetrics()
-	sender := sender.New(cfg.ServerAddr, cfg.Key)
+	sender := sender.New(cfg.ServerAddr, cfg.Key, cfg)
 
 	metricsChan := make(chan map[string]interface{})
 	var wg sync.WaitGroup

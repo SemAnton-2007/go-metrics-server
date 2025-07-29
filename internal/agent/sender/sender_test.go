@@ -5,8 +5,14 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"go-metrics-server/internal/agent/config"
+
 	"github.com/stretchr/testify/assert"
 )
+
+func getTestConfig() *config.Config {
+	return &config.Config{}
+}
 
 func TestSender_SendMetric(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -14,7 +20,7 @@ func TestSender_SendMetric(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	s := New(ts.URL, "")
+	s := New(ts.URL, "", getTestConfig())
 	err := s.SendMetric("gauge", "test", 123.45)
 	assert.NoError(t, err)
 
@@ -23,7 +29,7 @@ func TestSender_SendMetric(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	s = New(ts.URL, "")
+	s = New(ts.URL, "", getTestConfig())
 	err = s.SendMetric("gauge", "test", 123.45)
 	assert.Error(t, err)
 }
@@ -36,7 +42,7 @@ func TestSendMetricJSON(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	s := New(ts.URL, "")
+	s := New(ts.URL, "", getTestConfig())
 
 	t.Run("send gauge", func(t *testing.T) {
 		err := s.SendMetric("gauge", "test", 1.23)
@@ -58,14 +64,14 @@ func TestHashHeader(t *testing.T) {
 	defer ts.Close()
 
 	t.Run("without key", func(t *testing.T) {
-		s := New(ts.URL, "")
+		s := New(ts.URL, "", getTestConfig())
 		err := s.SendMetric("gauge", "test", 1.23)
 		assert.NoError(t, err)
 		assert.Empty(t, receivedHash)
 	})
 
 	t.Run("with key", func(t *testing.T) {
-		s := New(ts.URL, "testkey")
+		s := New(ts.URL, "testkey", getTestConfig())
 		err := s.SendMetric("gauge", "test", 1.23)
 		assert.NoError(t, err)
 		assert.NotEmpty(t, receivedHash)
@@ -80,7 +86,7 @@ func TestSendMetricsBatch(t *testing.T) {
 		}))
 		defer ts.Close()
 
-		s := New(ts.URL, "")
+		s := New(ts.URL, "", getTestConfig())
 		err := s.SendMetricsBatch(map[string]interface{}{
 			"gauge1":   1.23,
 			"counter1": int64(10),
@@ -89,7 +95,7 @@ func TestSendMetricsBatch(t *testing.T) {
 	})
 
 	t.Run("empty batch", func(t *testing.T) {
-		s := New("http://localhost:8080", "")
+		s := New("http://localhost:8080", "", getTestConfig())
 		err := s.SendMetricsBatch(map[string]interface{}{})
 		assert.NoError(t, err)
 	})

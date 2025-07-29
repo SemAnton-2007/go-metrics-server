@@ -4,15 +4,20 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/hmac"
+	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go-metrics-server/internal/agent/config"
+	"go-metrics-server/internal/crypto"
 	"go-metrics-server/internal/models"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -34,16 +39,28 @@ type Sender struct {
 	ServerURL string
 	Client    *http.Client
 	Key       string
+	PublicKey *rsa.PublicKey
 }
 
-func New(serverURL, key string) *Sender {
+func New(serverURL, key string, cfg *config.Config) *Sender {
 	if !strings.HasPrefix(serverURL, httpScheme) && !strings.HasPrefix(serverURL, httpsScheme) {
 		serverURL = httpScheme + serverURL
 	}
+
+	var publicKey *rsa.PublicKey
+	if cfg.CryptoKey != "" {
+		var err error
+		publicKey, err = crypto.LoadPublicKey(cfg.CryptoKey)
+		if err != nil {
+			logrus.Errorf("Failed to load public key: %v", err)
+		}
+	}
+
 	return &Sender{
 		ServerURL: serverURL,
 		Client:    &http.Client{Timeout: 10 * time.Second},
 		Key:       key,
+		PublicKey: publicKey,
 	}
 }
 
@@ -156,10 +173,20 @@ func (s *Sender) sendRequest(endpoint string, metrics []models.Metrics) error {
 		return fmt.Errorf("compression close error: %w", err)
 	}
 
+	bodyData := buf.Bytes()
+
+	if s.PublicKey != nil {
+		encryptedData, err := crypto.Encrypt(bodyData, s.PublicKey)
+		if err != nil {
+			return fmt.Errorf("encryption error: %w", err)
+		}
+		bodyData = encryptedData
+	}
+
 	req, err := http.NewRequest(
 		http.MethodPost,
 		fmt.Sprintf("%s%s", s.ServerURL, endpoint),
-		&buf,
+		bytes.NewReader(bodyData),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
@@ -168,6 +195,10 @@ func (s *Sender) sendRequest(endpoint string, metrics []models.Metrics) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Accept-Encoding", "gzip")
+
+	if s.PublicKey != nil {
+		req.Header.Set("Encryption", "hybrid")
+	}
 
 	if s.Key != "" {
 		h := hmac.New(sha256.New, []byte(s.Key))

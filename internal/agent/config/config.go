@@ -15,6 +15,7 @@ type Config struct {
 	ReportInterval time.Duration // Интервал отправки метрик
 	Key            string        // Ключ для подписи данных
 	RateLimit      int           // Ограничение количества одновременных запросов
+	CryptoKey      string        // Путь к файлу с публичным ключом
 }
 
 func NewConfig() *Config {
@@ -25,6 +26,7 @@ func NewConfig() *Config {
 	defaultReportInterval := 10
 	defaultKey := ""
 	defaultRateLimit := 1
+	defaultCryptoKey := ""
 
 	if addr := os.Getenv("ADDRESS"); addr != "" {
 		defaultServerAddr = addr
@@ -47,6 +49,9 @@ func NewConfig() *Config {
 			defaultRateLimit = rateLimit
 		}
 	}
+	if cryptoKey := os.Getenv("CRYPTO_KEY"); cryptoKey != "" {
+		defaultCryptoKey = cryptoKey
+	}
 
 	fs := flag.NewFlagSet("config", flag.ContinueOnError)
 	fs.StringVar(&cfg.ServerAddr, "a", defaultServerAddr, "Адрес HTTP-сервера")
@@ -54,6 +59,7 @@ func NewConfig() *Config {
 	reportInterval := fs.Int("r", defaultReportInterval, "Интервал отправки метрик (в секундах)")
 	fs.StringVar(&cfg.Key, "k", defaultKey, "Ключ для подписи данных")
 	fs.IntVar(&cfg.RateLimit, "l", defaultRateLimit, "Ограничение количества одновременных запросов")
+	fs.StringVar(&cfg.CryptoKey, "crypto-key", defaultCryptoKey, "Путь к файлу с публичным ключом")
 
 	args := filterArgs(os.Args[1:])
 

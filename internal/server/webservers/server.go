@@ -30,6 +30,9 @@ func NewServer(cfg *config.Config, repo repository.MetricRepository, db *databas
 
 	logger := zerolog.New(zerolog.NewConsoleWriter()).With().Timestamp().Logger()
 	r.Use(middleware.LoggerMiddleware(logger))
+
+	r.Use(middleware.DecryptionMiddleware(cfg))
+
 	r.Use(gzipMiddleware)
 	r.Use(jsonContentTypeMiddleware)
 

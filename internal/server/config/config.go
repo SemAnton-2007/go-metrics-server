@@ -17,6 +17,7 @@ const (
 	defaultRestore       = true
 	defaultDatabaseDSN   = ""
 	defaultKey           = ""
+	defaultCryptoKey     = ""
 )
 
 // Config holds application configuration parameters.
@@ -28,6 +29,7 @@ type Config struct {
 	Restore       bool          // Whether to load metrics at startup (env: RESTORE, flag: -r)
 	DatabaseDSN   string        // PostgreSQL connection DSN (env: DATABASE_DSN, flag: -d)
 	Key           string        // Secret key for hash verification (env: KEY, flag: -k)
+	CryptoKey     string        // Path to private key file (env: CRYPTO_KEY, flag: -crypto-key)
 }
 
 // NewConfig creates a new Config instance by parsing command line flags and environment variables.
@@ -42,6 +44,7 @@ func NewConfig() *Config {
 	restore := parseBool(getEnvOrDefault("RESTORE", strconv.FormatBool(defaultRestore)))
 	databaseDSN := getEnvOrDefault("DATABASE_DSN", defaultDatabaseDSN)
 	key := getEnvOrDefault("KEY", defaultKey)
+	cryptoKey := getEnvOrDefault("CRYPTO_KEY", defaultCryptoKey)
 
 	// Используем локальный FlagSet для изоляции флагов
 	fs := flag.NewFlagSet("config", flag.ContinueOnError)
@@ -51,6 +54,7 @@ func NewConfig() *Config {
 	fs.BoolVar(&cfg.Restore, "r", restore, "Загружать данные при старте")
 	fs.StringVar(&cfg.DatabaseDSN, "d", databaseDSN, "DSN")
 	fs.StringVar(&cfg.Key, "k", key, "Ключ для подписи данных")
+	fs.StringVar(&cfg.CryptoKey, "crypto-key", cryptoKey, "Путь к файлу с приватным ключом")
 
 	// Фильтруем аргументы, чтобы игнорировать флаги go test
 	args := filterArgs(os.Args[1:]) // Игнорируем первый аргумент (имя программы)
