@@ -1,17 +1,18 @@
 package config
 
 import (
+	"encoding/json"
 	"flag"
-	"fmt"
 	"log"
 	"os"
 	"strconv"
-	"strings"
 	"time"
+
+	"go-metrics-server/internal/config"
 )
 
 const (
-	defaultServerAddr    = "localhost:8080" // Значение по умолчанию для адреса сервера
+	defaultServerAddr    = "localhost:8080"
 	defaultStoreInterval = 300 * time.Second
 	defaultFileStorage   = "/tmp/metrics-db.json"
 	defaultRestore       = true
@@ -19,97 +20,120 @@ const (
 	defaultKey           = ""
 )
 
-// Config holds application configuration parameters.
-// Fields can be set via command line flags or environment variables.
 type Config struct {
-	ServerAddr    string        // Server address in host:port format (env: ADDRESS, flag: -a)
-	StoreInterval time.Duration // Interval for saving metrics to disk (env: STORE_INTERVAL, flag: -i)
-	FileStorage   string        // Path to metrics storage file (env: FILE_STORAGE_PATH, flag: -f)
-	Restore       bool          // Whether to load metrics at startup (env: RESTORE, flag: -r)
-	DatabaseDSN   string        // PostgreSQL connection DSN (env: DATABASE_DSN, flag: -d)
-	Key           string        // Secret key for hash verification (env: KEY, flag: -k)
+	config.CommonConfig
+
+	StoreInterval time.Duration `json:"store_interval"`
+	FileStorage   string        `json:"store_file"`
+	Restore       bool          `json:"restore"`
+	DatabaseDSN   string        `json:"database_dsn"`
+	Key           string        `json:"key"`
 }
 
-// NewConfig creates a new Config instance by parsing command line flags and environment variables.
-// Environment variables take precedence over default values but are overridden by command line flags.
 func NewConfig() *Config {
 	cfg := &Config{}
 
-	// Получаем значения из переменных окружения или используем значения по умолчанию
-	serverAddr := getEnvOrDefault("ADDRESS", defaultServerAddr)
-	storeInterval := parseDuration(getEnvOrDefault("STORE_INTERVAL", defaultStoreInterval.String()))
-	fileStorage := getEnvOrDefault("FILE_STORAGE_PATH", defaultFileStorage)
-	restore := parseBool(getEnvOrDefault("RESTORE", strconv.FormatBool(defaultRestore)))
-	databaseDSN := getEnvOrDefault("DATABASE_DSN", defaultDatabaseDSN)
-	key := getEnvOrDefault("KEY", defaultKey)
-
-	// Используем локальный FlagSet для изоляции флагов
-	fs := flag.NewFlagSet("config", flag.ContinueOnError)
-	fs.StringVar(&cfg.ServerAddr, "a", serverAddr, "Адрес HTTP-сервера")
-	fs.DurationVar(&cfg.StoreInterval, "i", storeInterval, "Интервал сохранения на диск (секунды)")
-	fs.StringVar(&cfg.FileStorage, "f", fileStorage, "Файл для сохранения метрик")
-	fs.BoolVar(&cfg.Restore, "r", restore, "Загружать данные при старте")
-	fs.StringVar(&cfg.DatabaseDSN, "d", databaseDSN, "DSN")
-	fs.StringVar(&cfg.Key, "k", key, "Ключ для подписи данных")
-
-	// Фильтруем аргументы, чтобы игнорировать флаги go test
-	args := filterArgs(os.Args[1:]) // Игнорируем первый аргумент (имя программы)
-
-	// Парсим только отфильтрованные аргументы
-	if err := fs.Parse(args); err != nil {
-		fmt.Println(fmt.Errorf("ошибка при парсинге флагов: %w", err))
-		os.Exit(1)
+	if configFile := config.GetConfigFile(); configFile != "" {
+		if err := cfg.loadFromFile(configFile); err != nil {
+			log.Printf("Warning: Failed to load config file: %v", err)
+		}
 	}
 
-	// Проверяем, что нет неизвестных флагов
-	if fs.NArg() > 0 {
-		fmt.Println(fmt.Errorf("ошибка: неизвестные флаги или аргументы"))
-		fs.Usage()
-		os.Exit(1)
-	}
+	cfg.setDefaults()
+	cfg.applyEnv()
+	cfg.parseFlags()
 
 	return cfg
 }
 
-// filterArgs удаляет флаги go test из списка аргументов
-func filterArgs(args []string) []string {
-	var filtered []string
-	for i := 0; i < len(args); i++ {
-		if !strings.HasPrefix(args[i], "-test.") {
-			filtered = append(filtered, args[i])
+func (cfg *Config) loadFromFile(filename string) error {
+	file, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	var fileCfg struct {
+		config.CommonConfig
+		StoreInterval string `json:"store_interval"`
+		StoreFile     string `json:"store_file"`
+		Restore       bool   `json:"restore"`
+		DatabaseDSN   string `json:"database_dsn"`
+		Key           string `json:"key"`
+	}
+
+	if err := json.NewDecoder(file).Decode(&fileCfg); err != nil {
+		return err
+	}
+
+	cfg.CommonConfig = fileCfg.CommonConfig
+
+	if fileCfg.StoreInterval != "" {
+		if dur, err := time.ParseDuration(fileCfg.StoreInterval); err == nil {
+			cfg.StoreInterval = dur
 		}
 	}
-	return filtered
+
+	cfg.FileStorage = fileCfg.StoreFile
+	cfg.Restore = fileCfg.Restore
+	cfg.DatabaseDSN = fileCfg.DatabaseDSN
+	cfg.Key = fileCfg.Key
+
+	return nil
 }
 
-func getEnvOrDefault(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
+func (cfg *Config) setDefaults() {
+	if cfg.ServerAddr == "" {
+		cfg.ServerAddr = defaultServerAddr
 	}
-	return defaultValue
+	if cfg.StoreInterval == 0 {
+		cfg.StoreInterval = defaultStoreInterval
+	}
+	if cfg.FileStorage == "" {
+		cfg.FileStorage = defaultFileStorage
+	}
+	if !cfg.Restore {
+		cfg.Restore = defaultRestore
+	}
 }
 
-func parseDuration(value string) time.Duration {
-	dur, err := time.ParseDuration(value)
-	if err == nil {
-		return dur
+func (cfg *Config) applyEnv() {
+	if envAddr := os.Getenv("ADDRESS"); envAddr != "" {
+		cfg.ServerAddr = envAddr
 	}
-
-	// Пробуем интерпретировать как число секунд
-	sec, err := strconv.Atoi(value)
-	if err == nil {
-		return time.Duration(sec) * time.Second
+	if envRestore := os.Getenv("RESTORE"); envRestore != "" {
+		if restore, err := strconv.ParseBool(envRestore); err == nil {
+			cfg.Restore = restore
+		}
 	}
-
-	log.Printf("Warning: Invalid STORE_INTERVAL value: %s, using default %v", value, defaultStoreInterval)
-	return defaultStoreInterval
+	if envStoreInterval := os.Getenv("STORE_INTERVAL"); envStoreInterval != "" {
+		if dur, err := time.ParseDuration(envStoreInterval); err == nil {
+			cfg.StoreInterval = dur
+		}
+	}
+	if envStoreFile := os.Getenv("FILE_STORAGE_PATH"); envStoreFile != "" {
+		cfg.FileStorage = envStoreFile
+	}
+	if envDatabaseDSN := os.Getenv("DATABASE_DSN"); envDatabaseDSN != "" {
+		cfg.DatabaseDSN = envDatabaseDSN
+	}
+	if envKey := os.Getenv("KEY"); envKey != "" {
+		cfg.Key = envKey
+	}
+	if envCryptoKey := os.Getenv("CRYPTO_KEY"); envCryptoKey != "" {
+		cfg.CryptoKey = envCryptoKey
+	}
 }
 
-func parseBool(value string) bool {
-	b, err := strconv.ParseBool(value)
-	if err != nil {
-		log.Printf("Warning: Invalid RESTORE value: %s, using default %v", value, defaultRestore)
-		return defaultRestore
-	}
-	return b
+func (cfg *Config) parseFlags() {
+	fs := flag.NewFlagSet("server-flags", flag.ContinueOnError)
+	fs.StringVar(&cfg.ServerAddr, "a", cfg.ServerAddr, "Server address")
+	fs.DurationVar(&cfg.StoreInterval, "i", cfg.StoreInterval, "Store interval")
+	fs.StringVar(&cfg.FileStorage, "f", cfg.FileStorage, "Store file")
+	fs.BoolVar(&cfg.Restore, "r", cfg.Restore, "Restore")
+	fs.StringVar(&cfg.DatabaseDSN, "d", cfg.DatabaseDSN, "Database DSN")
+	fs.StringVar(&cfg.Key, "k", cfg.Key, "Key for hash")
+	fs.StringVar(&cfg.CryptoKey, "crypto-key", cfg.CryptoKey, "Path to private key")
+
+	_ = fs.Parse(config.FilterArgs(os.Args[1:]))
 }

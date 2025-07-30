@@ -13,6 +13,7 @@ require (
 	github.com/kisielk/errcheck v1.9.0
 	github.com/rs/zerolog v1.33.0
 	github.com/shirou/gopsutil/v3 v3.23.12
+	github.com/sirupsen/logrus v1.9.3
 	github.com/timakin/bodyclose v0.0.0-20241222091800-1db5c5ca4d67
 	golang.org/x/tools v0.30.0
 	honnef.co/go/tools v0.4.1

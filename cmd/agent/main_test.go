@@ -4,12 +4,15 @@ import (
 	"testing"
 	"time"
 
-	"go-metrics-server/internal/agent/config"
+	agentconfig "go-metrics-server/internal/agent/config"
+	commonconfig "go-metrics-server/internal/config"
 )
 
 func TestRunAgent(t *testing.T) {
-	cfg := &config.Config{
-		ServerAddr:     "localhost:8080",
+	cfg := &agentconfig.Config{
+		CommonConfig: commonconfig.CommonConfig{
+			ServerAddr: "localhost:8080",
+		},
 		PollInterval:   50 * time.Millisecond,
 		ReportInterval: 50 * time.Millisecond,
 		RateLimit:      1,

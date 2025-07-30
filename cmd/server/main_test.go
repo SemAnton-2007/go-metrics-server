@@ -4,12 +4,15 @@ import (
 	"testing"
 	"time"
 
-	"go-metrics-server/internal/server/config"
+	commonconfig "go-metrics-server/internal/config"
+	serverconfig "go-metrics-server/internal/server/config"
 )
 
 func TestRunServer(t *testing.T) {
-	cfg := &config.Config{
-		ServerAddr:    ":8080",
+	cfg := &serverconfig.Config{
+		CommonConfig: commonconfig.CommonConfig{
+			ServerAddr: ":8080",
+		},
 		StoreInterval: time.Second,
 		FileStorage:   "",
 		Restore:       false,

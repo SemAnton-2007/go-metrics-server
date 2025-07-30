@@ -9,10 +9,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"go-metrics-server/internal/models"
 	"net/http"
 	"strings"
 	"time"
+
+	"go-metrics-server/internal/agent/config"
+	"go-metrics-server/internal/crypto/hybrid"
+	"go-metrics-server/internal/models"
 )
 
 const (
@@ -20,8 +23,6 @@ const (
 	httpsScheme       = "https://"
 	maxRetries        = 3
 	initialRetryDelay = time.Second
-	secondRetryDelay  = 3 * time.Second
-	thirdRetryDelay   = 5 * time.Second
 )
 
 var retryableErrors = []error{
@@ -34,16 +35,24 @@ type Sender struct {
 	ServerURL string
 	Client    *http.Client
 	Key       string
+	Encryptor *hybrid.Encryptor
 }
 
-func New(serverURL, key string) *Sender {
+func New(serverURL, key string, cfg *config.Config) *Sender {
 	if !strings.HasPrefix(serverURL, httpScheme) && !strings.HasPrefix(serverURL, httpsScheme) {
 		serverURL = httpScheme + serverURL
 	}
+
+	var encryptor *hybrid.Encryptor
+	if cfg.CryptoKey != "" {
+		encryptor, _ = hybrid.NewEncryptor(cfg.CryptoKey)
+	}
+
 	return &Sender{
 		ServerURL: serverURL,
 		Client:    &http.Client{Timeout: 10 * time.Second},
 		Key:       key,
+		Encryptor: encryptor,
 	}
 }
 
@@ -110,7 +119,7 @@ func (s *Sender) createMetric(metricType, name string, value interface{}) (model
 
 func (s *Sender) sendWithRetry(endpoint string, metrics []models.Metrics) error {
 	var lastErr error
-	delays := []time.Duration{initialRetryDelay, secondRetryDelay, thirdRetryDelay}
+	delays := []time.Duration{initialRetryDelay, 3 * initialRetryDelay, 5 * initialRetryDelay}
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
@@ -155,11 +164,21 @@ func (s *Sender) sendRequest(endpoint string, metrics []models.Metrics) error {
 	if err := gz.Close(); err != nil {
 		return fmt.Errorf("compression close error: %w", err)
 	}
+	bodyData := buf.Bytes()
+
+	// Шифрование данных, если настроено
+	if s.Encryptor != nil {
+		encryptedData, err := s.Encryptor.Encrypt(bodyData)
+		if err != nil {
+			return fmt.Errorf("encryption error: %w", err)
+		}
+		bodyData = encryptedData
+	}
 
 	req, err := http.NewRequest(
 		http.MethodPost,
 		fmt.Sprintf("%s%s", s.ServerURL, endpoint),
-		&buf,
+		bytes.NewReader(bodyData),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
@@ -168,6 +187,10 @@ func (s *Sender) sendRequest(endpoint string, metrics []models.Metrics) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Accept-Encoding", "gzip")
+
+	if s.Encryptor != nil {
+		req.Header.Set("Encryption", "hybrid")
+	}
 
 	if s.Key != "" {
 		h := hmac.New(sha256.New, []byte(s.Key))
@@ -182,11 +205,7 @@ func (s *Sender) sendRequest(endpoint string, metrics []models.Metrics) error {
 	if err != nil {
 		return fmt.Errorf("failed to send request: %w", err)
 	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			fmt.Printf("failed to close response body: %v\n", err)
-		}
-	}()
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("unexpected status: %d", resp.StatusCode)

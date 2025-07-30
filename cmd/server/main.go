@@ -92,8 +92,8 @@ func RunServer(cfg *config.Config) {
 	srv := webservers.NewServer(cfg, repo, db)
 	log.Printf("Server is running on http://%s\n", cfg.ServerAddr)
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 
 	serverErr := make(chan error, 1)
 	go func() {
@@ -103,25 +103,29 @@ func RunServer(cfg *config.Config) {
 	}()
 
 	select {
-	case <-stop:
-		log.Println("Server is shutting down...")
+	case sig := <-sigChan:
+		log.Printf("Received signal: %v. Shutting down...", sig)
 	case err := <-serverErr:
 		log.Fatalf("Server error: %v\n", err)
 	}
 
 	if cfg.DatabaseDSN == "" && cfg.FileStorage != "" {
-		if err := repo.SaveToFile(context.Background(), cfg.FileStorage); err != nil {
+		log.Println("Saving metrics before shutdown...")
+		saveCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := repo.SaveToFile(saveCtx, cfg.FileStorage); err != nil {
 			log.Printf("Failed to save metrics on shutdown: %v\n", err)
 		}
 	}
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("Server shutdown error: %v\n", err)
+	} else {
+		log.Println("Server stopped gracefully")
 	}
-	log.Println("Server stopped")
 }
 
 type syncSaveRepository struct {
