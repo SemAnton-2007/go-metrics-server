@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -36,6 +37,7 @@ type Sender struct {
 	Client    *http.Client
 	Key       string
 	Encryptor *hybrid.Encryptor
+	localIP   string
 }
 
 func New(serverURL, key string, cfg *config.Config) *Sender {
@@ -48,12 +50,33 @@ func New(serverURL, key string, cfg *config.Config) *Sender {
 		encryptor, _ = hybrid.NewEncryptor(cfg.CryptoKey)
 	}
 
+	ip, err := getLocalIP()
+	if err != nil {
+		ip = "127.0.0.1"
+	}
+
 	return &Sender{
 		ServerURL: serverURL,
 		Client:    &http.Client{Timeout: 10 * time.Second},
 		Key:       key,
 		Encryptor: encryptor,
+		localIP:   ip,
 	}
+}
+
+func getLocalIP() (string, error) {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return "", err
+	}
+	for _, addr := range addrs {
+		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				return ipnet.IP.String(), nil
+			}
+		}
+	}
+	return "", errors.New("no local IP found")
 }
 
 func (s *Sender) SendMetric(metricType, name string, value interface{}) error {
@@ -187,6 +210,7 @@ func (s *Sender) sendRequest(endpoint string, metrics []models.Metrics) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Accept-Encoding", "gzip")
+	req.Header.Set("X-Real-IP", s.localIP)
 
 	if s.Encryptor != nil {
 		req.Header.Set("Encryption", "hybrid")

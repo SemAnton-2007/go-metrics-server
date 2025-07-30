@@ -33,6 +33,8 @@ func NewServer(cfg *config.Config, repo repository.MetricRepository, db *databas
 
 	r.Use(middleware.DecryptionMiddleware(cfg))
 
+	r.Use(middleware.TrustedSubnetMiddleware(cfg.TrustedSubnet))
+
 	r.Use(gzipMiddleware)
 	r.Use(jsonContentTypeMiddleware)
 
