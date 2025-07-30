@@ -4,20 +4,18 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/hmac"
-	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"go-metrics-server/internal/agent/config"
-	"go-metrics-server/internal/crypto"
-	"go-metrics-server/internal/models"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	"go-metrics-server/internal/agent/config"
+	"go-metrics-server/internal/crypto/hybrid"
+	"go-metrics-server/internal/models"
 )
 
 const (
@@ -25,8 +23,6 @@ const (
 	httpsScheme       = "https://"
 	maxRetries        = 3
 	initialRetryDelay = time.Second
-	secondRetryDelay  = 3 * time.Second
-	thirdRetryDelay   = 5 * time.Second
 )
 
 var retryableErrors = []error{
@@ -39,8 +35,7 @@ type Sender struct {
 	ServerURL string
 	Client    *http.Client
 	Key       string
-	PublicKey *rsa.PublicKey
-	Config    *config.Config // Добавляем конфиг
+	Encryptor *hybrid.Encryptor
 }
 
 func New(serverURL, key string, cfg *config.Config) *Sender {
@@ -48,21 +43,16 @@ func New(serverURL, key string, cfg *config.Config) *Sender {
 		serverURL = httpScheme + serverURL
 	}
 
-	var publicKey *rsa.PublicKey
-	var err error
+	var encryptor *hybrid.Encryptor
 	if cfg.CryptoKey != "" {
-		publicKey, err = crypto.LoadPublicKey(cfg.CryptoKey)
-		if err != nil {
-			logrus.Errorf("Failed to load public key: %v", err)
-		}
+		encryptor, _ = hybrid.NewEncryptor(cfg.CryptoKey)
 	}
 
 	return &Sender{
 		ServerURL: serverURL,
 		Client:    &http.Client{Timeout: 10 * time.Second},
 		Key:       key,
-		PublicKey: publicKey,
-		Config:    cfg,
+		Encryptor: encryptor,
 	}
 }
 
@@ -129,7 +119,7 @@ func (s *Sender) createMetric(metricType, name string, value interface{}) (model
 
 func (s *Sender) sendWithRetry(endpoint string, metrics []models.Metrics) error {
 	var lastErr error
-	delays := []time.Duration{initialRetryDelay, secondRetryDelay, thirdRetryDelay}
+	delays := []time.Duration{initialRetryDelay, 3 * initialRetryDelay, 5 * initialRetryDelay}
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
@@ -174,11 +164,11 @@ func (s *Sender) sendRequest(endpoint string, metrics []models.Metrics) error {
 	if err := gz.Close(); err != nil {
 		return fmt.Errorf("compression close error: %w", err)
 	}
-
 	bodyData := buf.Bytes()
 
-	if s.PublicKey != nil {
-		encryptedData, err := crypto.Encrypt(bodyData, s.PublicKey)
+	// Шифрование данных, если настроено
+	if s.Encryptor != nil {
+		encryptedData, err := s.Encryptor.Encrypt(bodyData)
 		if err != nil {
 			return fmt.Errorf("encryption error: %w", err)
 		}
@@ -198,7 +188,7 @@ func (s *Sender) sendRequest(endpoint string, metrics []models.Metrics) error {
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Accept-Encoding", "gzip")
 
-	if s.PublicKey != nil {
+	if s.Encryptor != nil {
 		req.Header.Set("Encryption", "hybrid")
 	}
 
@@ -215,11 +205,7 @@ func (s *Sender) sendRequest(endpoint string, metrics []models.Metrics) error {
 	if err != nil {
 		return fmt.Errorf("failed to send request: %w", err)
 	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			fmt.Printf("failed to close response body: %v\n", err)
-		}
-	}()
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("unexpected status: %d", resp.StatusCode)

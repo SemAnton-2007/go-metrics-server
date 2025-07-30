@@ -3,12 +3,12 @@ package config
 import (
 	"encoding/json"
 	"flag"
-	"fmt"
 	"log"
 	"os"
 	"strconv"
-	"strings"
 	"time"
+
+	"go-metrics-server/internal/config"
 )
 
 const (
@@ -18,55 +18,32 @@ const (
 	defaultRestore       = true
 	defaultDatabaseDSN   = ""
 	defaultKey           = ""
-	defaultCryptoKey     = ""
-	defaultConfigFile    = ""
 )
 
 type Config struct {
-	ServerAddr    string        `json:"address"`
+	config.CommonConfig
+
 	StoreInterval time.Duration `json:"store_interval"`
 	FileStorage   string        `json:"store_file"`
 	Restore       bool          `json:"restore"`
 	DatabaseDSN   string        `json:"database_dsn"`
 	Key           string        `json:"key"`
-	CryptoKey     string        `json:"crypto_key"`
-	ConfigFile    string        `json:"-"`
 }
 
 func NewConfig() *Config {
 	cfg := &Config{}
 
-	configFile := getConfigFile()
-	if configFile != "" {
+	if configFile := config.GetConfigFile(); configFile != "" {
 		if err := cfg.loadFromFile(configFile); err != nil {
 			log.Printf("Warning: Failed to load config file: %v", err)
 		}
 	}
 
 	cfg.setDefaults()
-
 	cfg.applyEnv()
-
 	cfg.parseFlags()
 
 	return cfg
-}
-
-func getConfigFile() string {
-	fs := flag.NewFlagSet("config", flag.ContinueOnError)
-	configFile := fs.String("config", defaultConfigFile, "Path to config file")
-	fs.StringVar(configFile, "c", defaultConfigFile, "Path to config file (shorthand)")
-
-	_ = fs.Parse(filterArgs(os.Args[1:]))
-	if *configFile != "" {
-		return *configFile
-	}
-
-	if envConfig := os.Getenv("CONFIG"); envConfig != "" {
-		return envConfig
-	}
-
-	return defaultConfigFile
 }
 
 func (cfg *Config) loadFromFile(filename string) error {
@@ -76,45 +53,31 @@ func (cfg *Config) loadFromFile(filename string) error {
 	}
 	defer file.Close()
 
-	type fileConfig struct {
-		Address       string `json:"address"`
-		Restore       bool   `json:"restore"`
+	var fileCfg struct {
+		config.CommonConfig
 		StoreInterval string `json:"store_interval"`
 		StoreFile     string `json:"store_file"`
+		Restore       bool   `json:"restore"`
 		DatabaseDSN   string `json:"database_dsn"`
 		Key           string `json:"key"`
-		CryptoKey     string `json:"crypto_key"`
 	}
 
-	var fCfg fileConfig
-	decoder := json.NewDecoder(file)
-	if err := decoder.Decode(&fCfg); err != nil {
+	if err := json.NewDecoder(file).Decode(&fileCfg); err != nil {
 		return err
 	}
 
-	if fCfg.Address != "" {
-		cfg.ServerAddr = fCfg.Address
-	}
-	cfg.Restore = fCfg.Restore
-	if fCfg.StoreInterval != "" {
-		dur, err := time.ParseDuration(fCfg.StoreInterval)
-		if err != nil {
-			return fmt.Errorf("invalid store_interval: %w", err)
+	cfg.CommonConfig = fileCfg.CommonConfig
+
+	if fileCfg.StoreInterval != "" {
+		if dur, err := time.ParseDuration(fileCfg.StoreInterval); err == nil {
+			cfg.StoreInterval = dur
 		}
-		cfg.StoreInterval = dur
 	}
-	if fCfg.StoreFile != "" {
-		cfg.FileStorage = fCfg.StoreFile
-	}
-	if fCfg.DatabaseDSN != "" {
-		cfg.DatabaseDSN = fCfg.DatabaseDSN
-	}
-	if fCfg.Key != "" {
-		cfg.Key = fCfg.Key
-	}
-	if fCfg.CryptoKey != "" {
-		cfg.CryptoKey = fCfg.CryptoKey
-	}
+
+	cfg.FileStorage = fileCfg.StoreFile
+	cfg.Restore = fileCfg.Restore
+	cfg.DatabaseDSN = fileCfg.DatabaseDSN
+	cfg.Key = fileCfg.Key
 
 	return nil
 }
@@ -172,15 +135,5 @@ func (cfg *Config) parseFlags() {
 	fs.StringVar(&cfg.Key, "k", cfg.Key, "Key for hash")
 	fs.StringVar(&cfg.CryptoKey, "crypto-key", cfg.CryptoKey, "Path to private key")
 
-	_ = fs.Parse(filterArgs(os.Args[1:]))
-}
-
-func filterArgs(args []string) []string {
-	var filtered []string
-	for i := 0; i < len(args); i++ {
-		if !strings.HasPrefix(args[i], "-test.") {
-			filtered = append(filtered, args[i])
-		}
-	}
-	return filtered
+	_ = fs.Parse(config.FilterArgs(os.Args[1:]))
 }

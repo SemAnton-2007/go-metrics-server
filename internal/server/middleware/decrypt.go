@@ -2,10 +2,11 @@ package middleware
 
 import (
 	"bytes"
-	"go-metrics-server/internal/crypto"
 	"io"
 	"net/http"
 
+	"go-metrics-server/internal/crypto/hybrid"
+	"go-metrics-server/internal/crypto/keys"
 	"go-metrics-server/internal/server/config"
 
 	"github.com/sirupsen/logrus"
@@ -19,7 +20,7 @@ func DecryptionMiddleware(cfg *config.Config) func(http.Handler) http.Handler {
 				return
 			}
 
-			privateKey, err := crypto.LoadPrivateKey(cfg.CryptoKey)
+			privateKey, err := keys.LoadPrivateKey(cfg.CryptoKey)
 			if err != nil {
 				logrus.Errorf("Failed to load private key: %v", err)
 				http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -33,7 +34,7 @@ func DecryptionMiddleware(cfg *config.Config) func(http.Handler) http.Handler {
 			}
 			defer r.Body.Close()
 
-			decryptedBody, err := crypto.Decrypt(body, privateKey)
+			decryptedBody, err := hybrid.Decrypt(body, privateKey)
 			if err != nil {
 				logrus.Errorf("Decryption failed: %v", err)
 				http.Error(w, "Bad request", http.StatusBadRequest)

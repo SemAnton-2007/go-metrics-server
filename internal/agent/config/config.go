@@ -6,54 +6,34 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
 	"time"
+
+	"go-metrics-server/internal/config"
 )
 
 type Config struct {
-	ServerAddr     string        `json:"address"`
+	config.CommonConfig
+
 	PollInterval   time.Duration `json:"poll_interval"`
 	ReportInterval time.Duration `json:"report_interval"`
 	Key            string        `json:"key"`
 	RateLimit      int           `json:"rate_limit"`
-	CryptoKey      string        `json:"crypto_key"`
-	ConfigFile     string        `json:"-"`
 }
 
 func NewConfig() *Config {
 	cfg := &Config{}
 
-	configFile := getConfigFile()
-	if configFile != "" {
+	if configFile := config.GetConfigFile(); configFile != "" {
 		if err := cfg.loadFromFile(configFile); err != nil {
 			fmt.Printf("Warning: Failed to load config file: %v\n", err)
 		}
 	}
 
 	cfg.setDefaults()
-
 	cfg.applyEnv()
-
 	cfg.parseFlags()
 
 	return cfg
-}
-
-func getConfigFile() string {
-	fs := flag.NewFlagSet("config", flag.ContinueOnError)
-	configFile := fs.String("config", "", "Path to config file")
-	fs.StringVar(configFile, "c", "", "Path to config file (shorthand)")
-
-	_ = fs.Parse(filterArgs(os.Args[1:]))
-	if *configFile != "" {
-		return *configFile
-	}
-
-	if envConfig := os.Getenv("CONFIG"); envConfig != "" {
-		return envConfig
-	}
-
-	return ""
 }
 
 func (cfg *Config) loadFromFile(filename string) error {
@@ -63,68 +43,50 @@ func (cfg *Config) loadFromFile(filename string) error {
 	}
 	defer file.Close()
 
-	type fileConfig struct {
-		Address        string `json:"address"`
+	var fileCfg struct {
+		config.CommonConfig
 		PollInterval   string `json:"poll_interval"`
 		ReportInterval string `json:"report_interval"`
 		Key            string `json:"key"`
 		RateLimit      int    `json:"rate_limit"`
-		CryptoKey      string `json:"crypto_key"`
 	}
 
-	var fCfg fileConfig
-	decoder := json.NewDecoder(file)
-	if err := decoder.Decode(&fCfg); err != nil {
+	if err := json.NewDecoder(file).Decode(&fileCfg); err != nil {
 		return err
 	}
 
-	if fCfg.Address != "" {
-		cfg.ServerAddr = fCfg.Address
-	}
-	if fCfg.PollInterval != "" {
-		dur, err := time.ParseDuration(fCfg.PollInterval)
-		if err != nil {
-			return fmt.Errorf("invalid poll_interval: %w", err)
+	cfg.CommonConfig = fileCfg.CommonConfig
+
+	if fileCfg.PollInterval != "" {
+		if dur, err := time.ParseDuration(fileCfg.PollInterval); err == nil {
+			cfg.PollInterval = dur
 		}
-		cfg.PollInterval = dur
 	}
-	if fCfg.ReportInterval != "" {
-		dur, err := time.ParseDuration(fCfg.ReportInterval)
-		if err != nil {
-			return fmt.Errorf("invalid report_interval: %w", err)
+
+	if fileCfg.ReportInterval != "" {
+		if dur, err := time.ParseDuration(fileCfg.ReportInterval); err == nil {
+			cfg.ReportInterval = dur
 		}
-		cfg.ReportInterval = dur
 	}
-	if fCfg.Key != "" {
-		cfg.Key = fCfg.Key
-	}
-	if fCfg.RateLimit > 0 {
-		cfg.RateLimit = fCfg.RateLimit
-	}
-	if fCfg.CryptoKey != "" {
-		cfg.CryptoKey = fCfg.CryptoKey
-	}
+
+	cfg.Key = fileCfg.Key
+	cfg.RateLimit = fileCfg.RateLimit
 
 	return nil
 }
 
 func (cfg *Config) setDefaults() {
-	defaultServerAddr := "localhost:8080"
-	defaultPollInterval := 2
-	defaultReportInterval := 10
-	defaultRateLimit := 1
-
 	if cfg.ServerAddr == "" {
-		cfg.ServerAddr = defaultServerAddr
+		cfg.ServerAddr = "localhost:8080"
 	}
 	if cfg.PollInterval == 0 {
-		cfg.PollInterval = time.Duration(defaultPollInterval) * time.Second
+		cfg.PollInterval = 2 * time.Second
 	}
 	if cfg.ReportInterval == 0 {
-		cfg.ReportInterval = time.Duration(defaultReportInterval) * time.Second
+		cfg.ReportInterval = 10 * time.Second
 	}
 	if cfg.RateLimit == 0 {
-		cfg.RateLimit = defaultRateLimit
+		cfg.RateLimit = 1
 	}
 }
 
@@ -164,18 +126,8 @@ func (cfg *Config) parseFlags() {
 	fs.IntVar(&cfg.RateLimit, "l", cfg.RateLimit, "Rate limit")
 	fs.StringVar(&cfg.CryptoKey, "crypto-key", cfg.CryptoKey, "Path to public key")
 
-	_ = fs.Parse(filterArgs(os.Args[1:]))
+	_ = fs.Parse(config.FilterArgs(os.Args[1:]))
 
 	cfg.PollInterval = time.Duration(*pollInterval) * time.Second
 	cfg.ReportInterval = time.Duration(*reportInterval) * time.Second
-}
-
-func filterArgs(args []string) []string {
-	var filtered []string
-	for i := 0; i < len(args); i++ {
-		if !strings.HasPrefix(args[i], "-test.") {
-			filtered = append(filtered, args[i])
-		}
-	}
-	return filtered
 }
