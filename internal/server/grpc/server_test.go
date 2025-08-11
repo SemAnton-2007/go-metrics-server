@@ -37,8 +37,7 @@ func startTestServer(t *testing.T) (*grpc.Server, *bufconn.Listener) {
 }
 
 func createTestClient(t *testing.T, lis *bufconn.Listener) pb.MetricsServiceClient {
-	conn, err := grpc.DialContext(
-		context.Background(),
+	conn, err := grpc.NewClient(
 		"",
 		grpc.WithContextDialer(func(ctx context.Context, s string) (net.Conn, error) {
 			return lis.Dial()
