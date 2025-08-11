@@ -1,4 +1,3 @@
-// internal/server/service/service_test.go
 package service
 
 import (
@@ -149,6 +148,31 @@ func TestMetricService(t *testing.T) {
 		repo := &mockRepo{loadFromFileErr: errors.New("error")}
 		service := NewMetricService(repo)
 		err := service.LoadFromFile(context.Background(), "test")
+		assert.Error(t, err)
+	})
+}
+
+func TestUpdateFromString(t *testing.T) {
+	repo := &mockRepo{}
+	service := NewMetricService(repo)
+
+	t.Run("UpdateGaugeFromString valid", func(t *testing.T) {
+		err := service.UpdateGaugeFromString(context.Background(), "test", "123.45")
+		assert.NoError(t, err)
+	})
+
+	t.Run("UpdateGaugeFromString invalid", func(t *testing.T) {
+		err := service.UpdateGaugeFromString(context.Background(), "test", "invalid")
+		assert.Error(t, err)
+	})
+
+	t.Run("UpdateCounterFromString valid", func(t *testing.T) {
+		err := service.UpdateCounterFromString(context.Background(), "test", "10")
+		assert.NoError(t, err)
+	})
+
+	t.Run("UpdateCounterFromString invalid", func(t *testing.T) {
+		err := service.UpdateCounterFromString(context.Background(), "test", "invalid")
 		assert.Error(t, err)
 	})
 }

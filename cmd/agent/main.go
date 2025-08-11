@@ -24,6 +24,12 @@ func RunAgent(cfg *config.Config) {
 	sender := sender.New(cfg.ServerAddr, cfg.Key, cfg)
 	metricsChan := make(chan map[string]interface{})
 
+	if cfg.GRPCAddress != "" {
+		log.Printf("Using gRPC server at %s", cfg.GRPCAddress)
+	} else {
+		log.Printf("Using HTTP server at %s", cfg.ServerAddr)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

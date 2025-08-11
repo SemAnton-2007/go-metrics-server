@@ -50,3 +50,8 @@ func TestDB_Ping(t *testing.T) {
 		assert.Error(t, err, "Ping should fail with canceled context")
 	})
 }
+
+func TestDBConnectionError(t *testing.T) {
+	_, err := New("invalid_dsn")
+	assert.Error(t, err)
+}

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"go-metrics-server/internal/agent/config"
+	"go-metrics-server/internal/agent/grpcclient"
 	"go-metrics-server/internal/crypto/hybrid"
 	"go-metrics-server/internal/models"
 )
@@ -33,11 +34,12 @@ var retryableErrors = []error{
 }
 
 type Sender struct {
-	ServerURL string
-	Client    *http.Client
-	Key       string
-	Encryptor *hybrid.Encryptor
-	localIP   string
+	ServerURL  string
+	Client     *http.Client
+	Key        string
+	Encryptor  *hybrid.Encryptor
+	localIP    string
+	grpcClient *grpcclient.GRPCClient
 }
 
 func New(serverURL, key string, cfg *config.Config) *Sender {
@@ -50,17 +52,23 @@ func New(serverURL, key string, cfg *config.Config) *Sender {
 		encryptor, _ = hybrid.NewEncryptor(cfg.CryptoKey)
 	}
 
+	var grpcClient *grpcclient.GRPCClient
+	if cfg.GRPCAddress != "" {
+		grpcClient = grpcclient.New(cfg)
+	}
+
 	ip, err := getLocalIP()
 	if err != nil {
 		ip = "127.0.0.1"
 	}
 
 	return &Sender{
-		ServerURL: serverURL,
-		Client:    &http.Client{Timeout: 10 * time.Second},
-		Key:       key,
-		Encryptor: encryptor,
-		localIP:   ip,
+		ServerURL:  serverURL,
+		Client:     &http.Client{Timeout: 10 * time.Second},
+		Key:        key,
+		Encryptor:  encryptor,
+		localIP:    ip,
+		grpcClient: grpcClient,
 	}
 }
 
@@ -88,6 +96,9 @@ func (s *Sender) SendMetric(metricType, name string, value interface{}) error {
 }
 
 func (s *Sender) SendMetricsBatch(metrics map[string]interface{}) error {
+	if s.grpcClient != nil {
+		return s.grpcClient.SendMetrics(metrics)
+	}
 	var batch []models.Metrics
 
 	for name, value := range metrics {
