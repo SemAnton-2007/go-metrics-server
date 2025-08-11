@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 
 	"go-metrics-server/internal/agent/config"
@@ -18,23 +19,41 @@ type GRPCClient struct {
 }
 
 func New(cfg *config.Config) *GRPCClient {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	conn, err := grpc.DialContext(
-		ctx,
+	conn, err := grpc.NewClient(
 		cfg.GRPCAddress,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
 	)
 	if err != nil {
-		log.Printf("Failed to connect to gRPC server: %v", err)
+		log.Printf("Failed to create gRPC client: %v", err)
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	if !waitForReady(ctx, conn) {
+		log.Printf("Failed to establish connection to %s", cfg.GRPCAddress)
 		return nil
 	}
 
 	return &GRPCClient{
 		client: pb.NewMetricsServiceClient(conn),
 		conn:   conn,
+	}
+}
+
+func waitForReady(ctx context.Context, conn *grpc.ClientConn) bool {
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		default:
+			if conn.WaitForStateChange(ctx, conn.GetState()) {
+				if conn.GetState() == connectivity.Ready {
+					return true
+				}
+			}
+		}
 	}
 }
 

@@ -20,6 +20,7 @@ type Config struct {
 	ReportInterval time.Duration `json:"report_interval"`
 	Key            string        `json:"key"`
 	RateLimit      int           `json:"rate_limit"`
+	GRPCAddress    string        `json:"grpc_address"`
 }
 
 func NewConfig() *Config {
