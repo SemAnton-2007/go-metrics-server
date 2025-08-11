@@ -26,7 +26,7 @@ func RunServer(cfg *config.Config) {
 	go func() {
 		log.Println("Debug server running on :6060")
 		if err := http.ListenAndServe(":6060", nil); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Debug server error: %v\n", err)
+			log.Printf("Debug server error: %v\n", err)
 		}
 	}()
 
@@ -90,6 +90,11 @@ func RunServer(cfg *config.Config) {
 	}
 
 	srv := webservers.NewServer(cfg, repo, db)
+	if cfg.GRPCAddress == "" {
+		log.Printf("HTTP server running on http://%s", cfg.ServerAddr)
+	} else {
+		log.Printf("HTTP server running on http://%s, gRPC on %s", cfg.ServerAddr, cfg.GRPCAddress)
+	}
 	log.Printf("Server is running on http://%s\n", cfg.ServerAddr)
 
 	sigChan := make(chan os.Signal, 1)

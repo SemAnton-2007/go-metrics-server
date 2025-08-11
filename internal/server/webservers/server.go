@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"go-metrics-server/internal/server/config"
 	"go-metrics-server/internal/server/database"
+	"go-metrics-server/internal/server/grpc"
 	handler "go-metrics-server/internal/server/handlers"
 	"go-metrics-server/internal/server/middleware"
 	"go-metrics-server/internal/server/repository"
@@ -33,6 +34,8 @@ func NewServer(cfg *config.Config, repo repository.MetricRepository, db *databas
 
 	r.Use(middleware.DecryptionMiddleware(cfg))
 
+	r.Use(middleware.TrustedSubnetMiddleware(cfg.TrustedSubnet))
+
 	r.Use(gzipMiddleware)
 	r.Use(jsonContentTypeMiddleware)
 
@@ -49,6 +52,10 @@ func NewServer(cfg *config.Config, repo repository.MetricRepository, db *databas
 	if db != nil {
 		pingHandler := handler.NewPingHandler(db)
 		r.Get("/ping", pingHandler.Ping)
+	}
+
+	if cfg.GRPCAddress != "" {
+		go grpc.Start(cfg, repo)
 	}
 
 	return &http.Server{

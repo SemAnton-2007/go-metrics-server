@@ -11,6 +11,8 @@ import (
 	"go-metrics-server/internal/config"
 )
 
+const defaultGRPCAddress = "localhost:3200"
+
 type Config struct {
 	config.CommonConfig
 
@@ -18,6 +20,7 @@ type Config struct {
 	ReportInterval time.Duration `json:"report_interval"`
 	Key            string        `json:"key"`
 	RateLimit      int           `json:"rate_limit"`
+	GRPCAddress    string        `json:"grpc_address"`
 }
 
 func NewConfig() *Config {
@@ -88,6 +91,9 @@ func (cfg *Config) setDefaults() {
 	if cfg.RateLimit == 0 {
 		cfg.RateLimit = 1
 	}
+	if cfg.GRPCAddress == "" {
+		cfg.GRPCAddress = defaultGRPCAddress
+	}
 }
 
 func (cfg *Config) applyEnv() {
@@ -115,18 +121,23 @@ func (cfg *Config) applyEnv() {
 	if cryptoKey := os.Getenv("CRYPTO_KEY"); cryptoKey != "" {
 		cfg.CryptoKey = cryptoKey
 	}
+	if envGRPCAddress := os.Getenv("GRPC_ADDRESS"); envGRPCAddress != "" {
+		cfg.GRPCAddress = envGRPCAddress
+	}
 }
 
 func (cfg *Config) parseFlags() {
-	fs := flag.NewFlagSet("agent-flags", flag.ContinueOnError)
+	fs := flag.NewFlagSet("agent", flag.ContinueOnError)
+
 	fs.StringVar(&cfg.ServerAddr, "a", cfg.ServerAddr, "Server address")
 	pollInterval := fs.Int("p", int(cfg.PollInterval.Seconds()), "Poll interval (seconds)")
 	reportInterval := fs.Int("r", int(cfg.ReportInterval.Seconds()), "Report interval (seconds)")
 	fs.StringVar(&cfg.Key, "k", cfg.Key, "Key for hash")
 	fs.IntVar(&cfg.RateLimit, "l", cfg.RateLimit, "Rate limit")
 	fs.StringVar(&cfg.CryptoKey, "crypto-key", cfg.CryptoKey, "Path to public key")
+	fs.StringVar(&cfg.GRPCAddress, "g", cfg.GRPCAddress, "gRPC server address")
 
-	_ = fs.Parse(config.FilterArgs(os.Args[1:]))
+	fs.Parse(os.Args[1:])
 
 	cfg.PollInterval = time.Duration(*pollInterval) * time.Second
 	cfg.ReportInterval = time.Duration(*reportInterval) * time.Second

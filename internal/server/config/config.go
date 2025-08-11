@@ -18,6 +18,7 @@ const (
 	defaultRestore       = true
 	defaultDatabaseDSN   = ""
 	defaultKey           = ""
+	defaultGRPCAddress   = "localhost:3200"
 )
 
 type Config struct {
@@ -28,6 +29,8 @@ type Config struct {
 	Restore       bool          `json:"restore"`
 	DatabaseDSN   string        `json:"database_dsn"`
 	Key           string        `json:"key"`
+	CryptoKey     string        `json:"crypto_key"`
+	TrustedSubnet string        `json:"trusted_subnet"`
 }
 
 func NewConfig() *Config {
@@ -60,6 +63,7 @@ func (cfg *Config) loadFromFile(filename string) error {
 		Restore       bool   `json:"restore"`
 		DatabaseDSN   string `json:"database_dsn"`
 		Key           string `json:"key"`
+		TrustedSubnet string `json:"trusted_subnet"`
 	}
 
 	if err := json.NewDecoder(file).Decode(&fileCfg); err != nil {
@@ -78,6 +82,7 @@ func (cfg *Config) loadFromFile(filename string) error {
 	cfg.Restore = fileCfg.Restore
 	cfg.DatabaseDSN = fileCfg.DatabaseDSN
 	cfg.Key = fileCfg.Key
+	cfg.TrustedSubnet = fileCfg.TrustedSubnet
 
 	return nil
 }
@@ -94,6 +99,9 @@ func (cfg *Config) setDefaults() {
 	}
 	if !cfg.Restore {
 		cfg.Restore = defaultRestore
+	}
+	if cfg.GRPCAddress == "" {
+		cfg.GRPCAddress = defaultGRPCAddress
 	}
 }
 
@@ -123,10 +131,17 @@ func (cfg *Config) applyEnv() {
 	if envCryptoKey := os.Getenv("CRYPTO_KEY"); envCryptoKey != "" {
 		cfg.CryptoKey = envCryptoKey
 	}
+	if envTrustedSubnet := os.Getenv("TRUSTED_SUBNET"); envTrustedSubnet != "" {
+		cfg.TrustedSubnet = envTrustedSubnet
+	}
+	if envGRPCAddress := os.Getenv("GRPC_ADDRESS"); envGRPCAddress != "" {
+		cfg.GRPCAddress = envGRPCAddress
+	}
 }
 
 func (cfg *Config) parseFlags() {
-	fs := flag.NewFlagSet("server-flags", flag.ContinueOnError)
+	fs := flag.NewFlagSet("server", flag.ContinueOnError)
+
 	fs.StringVar(&cfg.ServerAddr, "a", cfg.ServerAddr, "Server address")
 	fs.DurationVar(&cfg.StoreInterval, "i", cfg.StoreInterval, "Store interval")
 	fs.StringVar(&cfg.FileStorage, "f", cfg.FileStorage, "Store file")
@@ -134,6 +149,8 @@ func (cfg *Config) parseFlags() {
 	fs.StringVar(&cfg.DatabaseDSN, "d", cfg.DatabaseDSN, "Database DSN")
 	fs.StringVar(&cfg.Key, "k", cfg.Key, "Key for hash")
 	fs.StringVar(&cfg.CryptoKey, "crypto-key", cfg.CryptoKey, "Path to private key")
+	fs.StringVar(&cfg.TrustedSubnet, "t", cfg.TrustedSubnet, "Trusted subnet (CIDR)")
+	fs.StringVar(&cfg.GRPCAddress, "g", cfg.GRPCAddress, "gRPC server address")
 
-	_ = fs.Parse(config.FilterArgs(os.Args[1:]))
+	fs.Parse(os.Args[1:])
 }

@@ -9,11 +9,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
 
 	"go-metrics-server/internal/agent/config"
+	"go-metrics-server/internal/agent/grpcclient"
 	"go-metrics-server/internal/crypto/hybrid"
 	"go-metrics-server/internal/models"
 )
@@ -32,10 +34,12 @@ var retryableErrors = []error{
 }
 
 type Sender struct {
-	ServerURL string
-	Client    *http.Client
-	Key       string
-	Encryptor *hybrid.Encryptor
+	ServerURL  string
+	Client     *http.Client
+	Key        string
+	Encryptor  *hybrid.Encryptor
+	localIP    string
+	grpcClient *grpcclient.GRPCClient
 }
 
 func New(serverURL, key string, cfg *config.Config) *Sender {
@@ -48,12 +52,39 @@ func New(serverURL, key string, cfg *config.Config) *Sender {
 		encryptor, _ = hybrid.NewEncryptor(cfg.CryptoKey)
 	}
 
-	return &Sender{
-		ServerURL: serverURL,
-		Client:    &http.Client{Timeout: 10 * time.Second},
-		Key:       key,
-		Encryptor: encryptor,
+	var grpcClient *grpcclient.GRPCClient
+	if cfg.GRPCAddress != "" {
+		grpcClient = grpcclient.New(cfg)
 	}
+
+	ip, err := getLocalIP()
+	if err != nil {
+		ip = "127.0.0.1"
+	}
+
+	return &Sender{
+		ServerURL:  serverURL,
+		Client:     &http.Client{Timeout: 10 * time.Second},
+		Key:        key,
+		Encryptor:  encryptor,
+		localIP:    ip,
+		grpcClient: grpcClient,
+	}
+}
+
+func getLocalIP() (string, error) {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return "", err
+	}
+	for _, addr := range addrs {
+		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				return ipnet.IP.String(), nil
+			}
+		}
+	}
+	return "", errors.New("no local IP found")
 }
 
 func (s *Sender) SendMetric(metricType, name string, value interface{}) error {
@@ -65,6 +96,9 @@ func (s *Sender) SendMetric(metricType, name string, value interface{}) error {
 }
 
 func (s *Sender) SendMetricsBatch(metrics map[string]interface{}) error {
+	if s.grpcClient != nil {
+		return s.grpcClient.SendMetrics(metrics)
+	}
 	var batch []models.Metrics
 
 	for name, value := range metrics {
@@ -187,6 +221,7 @@ func (s *Sender) sendRequest(endpoint string, metrics []models.Metrics) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Accept-Encoding", "gzip")
+	req.Header.Set("X-Real-IP", s.localIP)
 
 	if s.Encryptor != nil {
 		req.Header.Set("Encryption", "hybrid")

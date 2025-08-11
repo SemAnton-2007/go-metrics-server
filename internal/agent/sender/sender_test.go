@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"go-metrics-server/internal/agent/config"
+	"go-metrics-server/internal/models"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -98,5 +99,24 @@ func TestSendMetricsBatch(t *testing.T) {
 		s := New("http://localhost:8080", "", getTestConfig())
 		err := s.SendMetricsBatch(map[string]interface{}{})
 		assert.NoError(t, err)
+	})
+}
+
+func TestSendRequestErrors(t *testing.T) {
+	t.Run("request creation error", func(t *testing.T) {
+		s := New("invalid_url", "", getTestConfig())
+		err := s.sendRequest("/update/", []models.Metrics{{}})
+		assert.Error(t, err)
+	})
+
+	t.Run("non-retryable error", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusBadRequest)
+		}))
+		defer ts.Close()
+
+		s := New(ts.URL, "", getTestConfig())
+		err := s.sendWithRetry("/update/", []models.Metrics{{}})
+		assert.Error(t, err)
 	})
 }
